@@ -1,6 +1,7 @@
 package com.iflytek.chatbot.config;
 
 import com.iflytek.chatbot.advisor.LongTermMemoryAdvisor;
+import com.iflytek.chatbot.advisor.RagAdvisor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
@@ -15,13 +16,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * 核心配置类：组装三层记忆体系
+ * 核心配置类：组装四层记忆体系
  *
  * <p>Advisor 执行顺序：</p>
  * <ol>
  *   <li>order=0 MessageChatMemoryAdvisor  —— 短期记忆：滑动窗口最近N条消息</li>
  *   <li>order=1 VectorStoreChatMemoryAdvisor —— 语义记忆：从Milvus检索相似历史对话</li>
  *   <li>order=2 LongTermMemoryAdvisor —— 长期记忆：检索用户事实/偏好</li>
+ *   <li>order=3 RagAdvisor —— RAG知识检索：从用户知识库检索相关文档片段</li>
  *   <li>order=100 SimpleLoggerAdvisor —— 日志</li>
  * </ol>
  */
@@ -48,7 +50,8 @@ public class MemoryConfig {
     public ChatClient chatClient(@Qualifier("deepSeekChatModel") ChatModel chatModel,
                                   ChatMemory chatMemory,
                                   VectorStore vectorStore,
-                                  LongTermMemoryAdvisor longTermMemoryAdvisor) {
+                                  LongTermMemoryAdvisor longTermMemoryAdvisor,
+                                  RagAdvisor ragAdvisor) {
         return ChatClient.builder(chatModel)
                 .defaultSystem("You are a helpful assistant with long-term memory. " +
                         "Use the provided user memory and conversation context to give personalized responses.")
@@ -62,6 +65,8 @@ public class MemoryConfig {
                                 .build(),
                         // 长期记忆：从Milvus检索用户事实/偏好注入prompt
                         longTermMemoryAdvisor,
+                        // RAG知识检索：从用户知识库检索相关文档片段注入prompt
+                        ragAdvisor,
                         new SimpleLoggerAdvisor()
                 )
                 .build();

@@ -69,3 +69,19 @@ CREATE TABLE IF NOT EXISTS `memory_extraction_log` (
     INDEX `idx_extraction_log_user` (`user_id`),
     INDEX `idx_extraction_log_conv` (`conversation_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table 5: rag_document - tracks uploaded RAG knowledge base documents
+CREATE TABLE IF NOT EXISTS `rag_document` (
+    `id`              BIGINT        NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `user_id`         VARCHAR(64)   NOT NULL COMMENT 'Owner user identifier',
+    `file_name`       VARCHAR(255)  NOT NULL COMMENT 'Original file name',
+    `file_type`       VARCHAR(16)   NOT NULL COMMENT 'File type: pdf, txt, md',
+    `file_size`       BIGINT        NOT NULL COMMENT 'File size in bytes',
+    `status`          VARCHAR(16)   NOT NULL DEFAULT 'processing' COMMENT 'processing, completed, failed',
+    `chunk_count`     INT           DEFAULT NULL COMMENT 'Number of chunks created after processing',
+    `error_message`   TEXT          DEFAULT NULL COMMENT 'Error details if processing failed',
+    `created_at`      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_rag_doc_user_id` (`user_id`),
+    INDEX `idx_rag_doc_user_status` (`user_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
