@@ -9,7 +9,9 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -39,6 +41,17 @@ public class ChatController {
         log.info("========== [Controller] 返回响应 | sessionId={}, reply={}", response.sessionId(), replyPreview);
 
         return Result.success(response);
+    }
+
+    @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "流式发送消息", description = "SSE流式返回AI回复，支持多轮对话记忆")
+    public SseEmitter stream(@RequestBody ChatRequest request) {
+        log.info("========== [Controller] 收到流式聊天请求 | userId={}, sessionId={}, message={}",
+                request.userId(), request.sessionId(), request.message());
+
+        SseEmitter emitter = new SseEmitter(5 * 60 * 1000L);
+        chatService.streamChat(request, emitter);
+        return emitter;
     }
 
     @GetMapping("/history")

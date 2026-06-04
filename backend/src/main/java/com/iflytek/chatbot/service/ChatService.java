@@ -15,9 +15,12 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 public class ChatService {
@@ -92,6 +95,121 @@ public class ChatService {
         asyncExtractAndStore(sessionId, request.userId(), request.message(), reply);
 
         return new ChatResponse(sessionId, reply);
+    }
+
+    public void streamChat(ChatRequest request, SseEmitter emitter) {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executor.submit(() -> {
+            try {
+                // 1. 解析或创建会话
+                String sessionId = resolveSessionId(request.userId(), request.sessionId());
+                log.info("[ChatService-Stream] 会话已就绪 | sessionId={}", sessionId);
+
+                // 2. 插件 beforeRag 阶段
+                PluginService.BeforeRagResult beforeResult = pluginService.executeBeforeRag(
+                        request.message(), request.userId());
+
+                String actualQuery = beforeResult.actualQuery();
+
+                if (beforeResult.shortCircuit()) {
+                    // 插件短路：直接发送完整结果
+                    String reply = beforeResult.answer();
+                    log.info("[ChatService-Stream] 插件短路 | plugin={}", beforeResult.shortCircuitPlugin());
+
+                    emitter.send(SseEmitter.event()
+                            .name("delta")
+                            .data("{\"content\": \"" + escapeJson(reply) + "\"}"));
+                    emitter.send(SseEmitter.event()
+                            .name("done")
+                            .data("{\"sessionId\": \"" + sessionId + "\", \"reply\": \"" + escapeJson(reply) + "\"}"));
+                    emitter.complete();
+                    return;
+                }
+
+                // 3. 流式调用 ChatClient
+                log.info("[ChatService-Stream] >>> 开始流式调用 | message={}", actualQuery);
+                long start = System.currentTimeMillis();
+
+                StringBuilder fullReply = new StringBuilder();
+
+                chatClient.prompt()
+                        .user(actualQuery)
+                        .advisors(a -> a
+                                .param("chat_memory_conversation_id", sessionId)
+                                .param("chat_memory_user_id", request.userId()))
+                        .stream()
+                        .content()
+                        .doOnNext(chunk -> {
+                            fullReply.append(chunk);
+                            try {
+                                emitter.send(SseEmitter.event()
+                                        .name("delta")
+                                        .data("{\"content\": \"" + escapeJson(chunk) + "\"}"));
+                            } catch (Exception e) {
+                                log.warn("[ChatService-Stream] 发送 chunk 失败: {}", e.getMessage());
+                            }
+                        })
+                        .doOnComplete(() -> {
+                            try {
+                                long elapsed = System.currentTimeMillis() - start;
+                                log.info("[ChatService-Stream] <<< 流式调用完成 | 耗时={}ms, 长度={}", elapsed, fullReply.length());
+
+                                // 4. afterRag 阶段
+                                String reply = fullReply.toString();
+                                PluginContext pluginCtx = new PluginContext(
+                                        request.message(), actualQuery, false, null);
+                                reply = pluginService.executeAfterRag(reply, request.message(), request.userId(), pluginCtx);
+
+                                // 5. 发送 done 事件
+                                emitter.send(SseEmitter.event()
+                                        .name("done")
+                                        .data("{\"sessionId\": \"" + sessionId + "\", \"reply\": \"" + escapeJson(reply) + "\"}"));
+                                emitter.complete();
+
+                                // 6. 异步后处理
+                                asyncExtractAndStore(sessionId, request.userId(), request.message(), reply);
+                            } catch (Exception e) {
+                                log.error("[ChatService-Stream] 完成处理失败: {}", e.getMessage(), e);
+                                try {
+                                    emitter.completeWithError(e);
+                                } catch (Exception ignored) {}
+                            }
+                        })
+                        .doOnError(error -> {
+                            log.error("[ChatService-Stream] 流式调用失败: {}", error.getMessage(), error);
+                            try {
+                                emitter.send(SseEmitter.event()
+                                        .name("error")
+                                        .data("{\"message\": \"" + escapeJson(error.getMessage()) + "\"}"));
+                                emitter.completeWithError(error);
+                            } catch (Exception e) {
+                                try {
+                                    emitter.completeWithError(error);
+                                } catch (Exception ignored) {}
+                            }
+                        })
+                        .subscribe();
+
+            } catch (Exception e) {
+                log.error("[ChatService-Stream] 异常: {}", e.getMessage(), e);
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name("error")
+                            .data("{\"message\": \"" + escapeJson(e.getMessage()) + "\"}"));
+                    emitter.completeWithError(e);
+                } catch (Exception ignored) {}
+            }
+        });
+        executor.shutdown();
+    }
+
+    private static String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 
     public String resolveSessionId(String userId, String sessionId) {
