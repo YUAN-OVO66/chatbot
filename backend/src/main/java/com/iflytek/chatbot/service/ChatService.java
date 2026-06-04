@@ -4,6 +4,8 @@ import com.iflytek.chatbot.dto.ChatMessage;
 import com.iflytek.chatbot.dto.ChatRequest;
 import com.iflytek.chatbot.dto.ChatResponse;
 import com.iflytek.chatbot.entity.ChatSession;
+import com.iflytek.chatbot.plugin.PluginContext;
+import com.iflytek.chatbot.plugin.PluginService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -27,17 +29,20 @@ public class ChatService {
     private final SessionService sessionService;
     private final LongTermMemoryService longTermMemoryService;
     private final SemanticMemoryService semanticMemoryService;
+    private final PluginService pluginService;
 
     public ChatService(ChatClient chatClient,
                        ChatMemory chatMemory,
                        SessionService sessionService,
                        LongTermMemoryService longTermMemoryService,
-                       SemanticMemoryService semanticMemoryService) {
+                       SemanticMemoryService semanticMemoryService,
+                       PluginService pluginService) {
         this.chatClient = chatClient;
         this.chatMemory = chatMemory;
         this.sessionService = sessionService;
         this.longTermMemoryService = longTermMemoryService;
         this.semanticMemoryService = semanticMemoryService;
+        this.pluginService = pluginService;
     }
 
     public ChatResponse chat(ChatRequest request) {
@@ -45,23 +50,44 @@ public class ChatService {
         String sessionId = resolveSessionId(request.userId(), request.sessionId());
         log.info("[ChatService] 会话已就绪 | sessionId={}, userId={}", sessionId, request.userId());
 
-        // 2. 调用 ChatClient（三层 Advisor 链自动注入记忆上下文）
-        log.info("[ChatService] >>> 调用 ChatClient（DeepSeek）开始 | message={}", request.message());
-        long start = System.currentTimeMillis();
+        // 2. 插件 beforeRag 阶段
+        PluginService.BeforeRagResult beforeResult = pluginService.executeBeforeRag(
+                request.message(), request.userId());
 
-        String reply = chatClient.prompt()
-                .user(request.message())
-                .advisors(a -> a
-                        .param("chat_memory_conversation_id", sessionId)
-                        .param("chat_memory_user_id", request.userId()))
-                .call()
-                .content();
+        String actualQuery = beforeResult.actualQuery();
+        String reply;
+        boolean shortCircuited = false;
 
-        long elapsed = System.currentTimeMillis() - start;
-        String replyPreview = reply.length() > 100 ? reply.substring(0, 100) + "..." : reply;
-        log.info("[ChatService] <<< ChatClient 返回 | 耗时={}ms, reply={}", elapsed, replyPreview);
+        if (beforeResult.shortCircuit()) {
+            // 插件短路：直接使用插件返回的答案，跳过 LLM
+            reply = beforeResult.answer();
+            shortCircuited = true;
+            log.info("[ChatService] 插件短路 | plugin={}", beforeResult.shortCircuitPlugin());
+        } else {
+            // 3. 调用 ChatClient（四层 Advisor 链自动注入记忆上下文）
+            log.info("[ChatService] >>> 调用 ChatClient（DeepSeek）开始 | message={}", actualQuery);
+            long start = System.currentTimeMillis();
 
-        // 3. 异步后处理
+            reply = chatClient.prompt()
+                    .user(actualQuery)
+                    .advisors(a -> a
+                            .param("chat_memory_conversation_id", sessionId)
+                            .param("chat_memory_user_id", request.userId()))
+                    .call()
+                    .content();
+
+            long elapsed = System.currentTimeMillis() - start;
+            String replyPreview = reply.length() > 100 ? reply.substring(0, 100) + "..." : reply;
+            log.info("[ChatService] <<< ChatClient 返回 | 耗时={}ms, reply={}", elapsed, replyPreview);
+        }
+
+        // 4. 插件 afterRag 阶段
+        PluginContext pluginCtx = new PluginContext(
+                request.message(), actualQuery, shortCircuited,
+                shortCircuited ? beforeResult.shortCircuitPlugin() : null);
+        reply = pluginService.executeAfterRag(reply, request.message(), request.userId(), pluginCtx);
+
+        // 5. 异步后处理
         log.info("[ChatService] 提交异步后处理 | sessionId={}", sessionId);
         asyncExtractAndStore(sessionId, request.userId(), request.message(), reply);
 

@@ -75,3 +75,15 @@ springdoc:
       paths-to-match: /**
 knife4j:
   enable: true
+
+chatbot:
+  plugins:
+    enabled: true
+    items:
+      time: { enabled: false }
+      calculator: { enabled: false }
+      web-search:
+        enabled: false
+        config:
+          api-key: ${QIANFAN_API_KEY}
+          top-k: 5
