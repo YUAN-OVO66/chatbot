@@ -97,6 +97,9 @@ public class ChatService {
         return new ChatResponse(sessionId, reply);
     }
 
+    private static final int MAX_STREAM_RETRIES = 3;
+    private static final long[] RETRY_DELAYS_MS = {1000, 2000, 3000};
+
     public void streamChat(ChatRequest request, SseEmitter emitter) {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.submit(() -> {
@@ -112,7 +115,6 @@ public class ChatService {
                 String actualQuery = beforeResult.actualQuery();
 
                 if (beforeResult.shortCircuit()) {
-                    // 插件短路：直接发送完整结果
                     String reply = beforeResult.answer();
                     log.info("[ChatService-Stream] 插件短路 | plugin={}", beforeResult.shortCircuitPlugin());
 
@@ -126,72 +128,79 @@ public class ChatService {
                     return;
                 }
 
-                // 3. 流式调用 ChatClient
+                // 3. 带重试的流式调用
                 log.info("[ChatService-Stream] >>> 开始流式调用 | message={}", actualQuery);
                 long start = System.currentTimeMillis();
 
-                StringBuilder fullReply = new StringBuilder();
+                for (int attempt = 0; attempt <= MAX_STREAM_RETRIES; attempt++) {
+                    try {
+                        if (attempt > 0) {
+                            long delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
+                            log.info("[ChatService-Stream] 第 {} 次重试, 等待 {}ms", attempt, delay);
+                            Thread.sleep(delay);
+                        }
 
-                chatClient.prompt()
-                        .user(actualQuery)
-                        .advisors(a -> a
-                                .param("chat_memory_conversation_id", sessionId)
-                                .param("chat_memory_user_id", request.userId()))
-                        .stream()
-                        .content()
-                        .doOnNext(chunk -> {
-                            fullReply.append(chunk);
-                            try {
-                                emitter.send(SseEmitter.event()
-                                        .name("delta")
-                                        .data("{\"content\": \"" + escapeJson(chunk) + "\"}"));
-                            } catch (Exception e) {
-                                log.warn("[ChatService-Stream] 发送 chunk 失败: {}", e.getMessage());
-                            }
-                        })
-                        .doOnComplete(() -> {
-                            try {
-                                long elapsed = System.currentTimeMillis() - start;
-                                log.info("[ChatService-Stream] <<< 流式调用完成 | 耗时={}ms, 长度={}", elapsed, fullReply.length());
+                        StringBuilder fullReply = new StringBuilder();
+                        boolean[] completed = {false};
+                        Exception[] streamError = {null};
 
-                                // 4. afterRag 阶段
-                                String reply = fullReply.toString();
-                                PluginContext pluginCtx = new PluginContext(
-                                        request.message(), actualQuery, false, null);
-                                reply = pluginService.executeAfterRag(reply, request.message(), request.userId(), pluginCtx);
+                        chatClient.prompt()
+                                .user(actualQuery)
+                                .advisors(a -> a
+                                        .param("chat_memory_conversation_id", sessionId)
+                                        .param("chat_memory_user_id", request.userId()))
+                                .stream()
+                                .content()
+                                .doOnNext(chunk -> {
+                                    fullReply.append(chunk);
+                                    try {
+                                        emitter.send(SseEmitter.event()
+                                                .name("delta")
+                                                .data("{\"content\": \"" + escapeJson(chunk) + "\"}"));
+                                    } catch (Exception e) {
+                                        log.warn("[ChatService-Stream] 发送 chunk 失败: {}", e.getMessage());
+                                    }
+                                })
+                                .doOnComplete(() -> completed[0] = true)
+                                .doOnError(error -> {
+                                    streamError[0] = (error instanceof Exception ex) ? ex : new RuntimeException(error);
+                                })
+                                .blockLast();  // 同步等待流完成
 
-                                // 5. 发送 done 事件
-                                emitter.send(SseEmitter.event()
-                                        .name("done")
-                                        .data("{\"sessionId\": \"" + sessionId + "\", \"reply\": \"" + escapeJson(reply) + "\"}"));
-                                emitter.complete();
+                        // 流正常完成
+                        if (streamError[0] != null) throw streamError[0];
 
-                                // 6. 异步后处理
-                                asyncExtractAndStore(sessionId, request.userId(), request.message(), reply);
-                            } catch (Exception e) {
-                                log.error("[ChatService-Stream] 完成处理失败: {}", e.getMessage(), e);
-                                try {
-                                    emitter.completeWithError(e);
-                                } catch (Exception ignored) {}
-                            }
-                        })
-                        .doOnError(error -> {
-                            log.error("[ChatService-Stream] 流式调用失败: {}", error.getMessage(), error);
-                            try {
-                                emitter.send(SseEmitter.event()
-                                        .name("error")
-                                        .data("{\"message\": \"" + escapeJson(error.getMessage()) + "\"}"));
-                                emitter.completeWithError(error);
-                            } catch (Exception e) {
-                                try {
-                                    emitter.completeWithError(error);
-                                } catch (Exception ignored) {}
-                            }
-                        })
-                        .subscribe();
+                        long elapsed = System.currentTimeMillis() - start;
+                        log.info("[ChatService-Stream] <<< 流式调用完成 | 耗时={}ms, 长度={}", elapsed, fullReply.length());
+
+                        // 4. afterRag 阶段
+                        String reply = fullReply.toString();
+                        PluginContext pluginCtx = new PluginContext(
+                                request.message(), actualQuery, false, null);
+                        reply = pluginService.executeAfterRag(reply, request.message(), request.userId(), pluginCtx);
+
+                        // 5. 发送 done 事件
+                        emitter.send(SseEmitter.event()
+                                .name("done")
+                                .data("{\"sessionId\": \"" + sessionId + "\", \"reply\": \"" + escapeJson(reply) + "\"}"));
+                        emitter.complete();
+
+                        // 6. 异步后处理
+                        asyncExtractAndStore(sessionId, request.userId(), request.message(), reply);
+                        return;  // 成功，退出重试循环
+
+                    } catch (Exception e) {
+                        boolean isConnectionError = isConnectionReset(e);
+                        if (isConnectionError && attempt < MAX_STREAM_RETRIES) {
+                            log.warn("[ChatService-Stream] 连接异常, 将重试 | attempt={}, error={}", attempt + 1, e.getMessage());
+                            continue;
+                        }
+                        throw e;  // 非连接错误 或 重试次数用尽
+                    }
+                }
 
             } catch (Exception e) {
-                log.error("[ChatService-Stream] 异常: {}", e.getMessage(), e);
+                log.error("[ChatService-Stream] 最终失败: {}", e.getMessage(), e);
                 try {
                     emitter.send(SseEmitter.event()
                             .name("error")
@@ -201,6 +210,34 @@ public class ChatService {
             }
         });
         executor.shutdown();
+    }
+
+    private boolean isConnectionReset(Throwable e) {
+        Throwable cause = e;
+        while (cause != null) {
+            String msg = cause.getMessage();
+            if (msg != null) {
+                String lower = msg.toLowerCase();
+                if (lower.contains("connection reset")
+                        || lower.contains("connection reset by peer")
+                        || lower.contains("broken pipe")
+                        || lower.contains("connection closed")
+                        || lower.contains("unexpected end of stream")
+                        || lower.contains("socket closed")
+                        || lower.contains("forcibly closed")
+                        || lower.contains("远程主机强迫关闭了一个现有的连接")) {
+                    return true;
+                }
+            }
+            // 检查异常类型
+            String className = cause.getClass().getSimpleName();
+            if (className.contains("Reset") || className.contains("Pipe")
+                    || className.contains("ConnectException") || className.contains("SocketException")) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
     }
 
     private static String escapeJson(String s) {
