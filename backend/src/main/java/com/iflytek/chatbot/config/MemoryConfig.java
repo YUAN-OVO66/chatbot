@@ -58,8 +58,18 @@ public class MemoryConfig {
                                   ToolCallback readSkillToolCallback,
                                   ToolCallback shellToolCallback) {
         return ChatClient.builder(chatModel)
-                .defaultSystem("You are a helpful assistant with long-term memory. " +
-                        "Use the provided user memory and conversation context to give personalized responses.")
+                .defaultSystem("""
+                        You are a helpful assistant with long-term memory.
+                        Use the provided user memory and conversation context to give personalized responses.
+
+                        ## Skill Usage Rules (VERY IMPORTANT)
+                        You have access to skills (read_skill and shell tools), but you MUST follow these rules:
+                        - For simple questions (time, date, weather knowledge, general knowledge, casual chat, greetings), answer directly WITHOUT using any skills or tools.
+                        - For questions you can answer from your own knowledge, do NOT invoke skills.
+                        - ONLY use skills when the user explicitly asks you to perform a specific action (send email, execute code, check a server, etc.) that requires external execution.
+                        - When in doubt, answer directly first. Only use skills if a direct answer is insufficient.
+                        - NEVER read a SKILL.md or execute shell commands for simple informational questions.
+                        """)
                 .defaultAdvisors(
                         // 短期记忆：从MySQL读取最近对话消息注入prompt
                         MessageChatMemoryAdvisor.builder(chatMemory).order(0).build(),
