@@ -1,8 +1,8 @@
 package com.iflytek.chatbot.config;
 
+import com.alibaba.cloud.ai.graph.advisors.SkillPromptAugmentAdvisor;
 import com.iflytek.chatbot.advisor.LongTermMemoryAdvisor;
 import com.iflytek.chatbot.advisor.RagAdvisor;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -11,7 +11,9 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -51,7 +53,10 @@ public class MemoryConfig {
                                   ChatMemory chatMemory,
                                   VectorStore vectorStore,
                                   LongTermMemoryAdvisor longTermMemoryAdvisor,
-                                  RagAdvisor ragAdvisor) {
+                                  RagAdvisor ragAdvisor,
+                                  SkillPromptAugmentAdvisor skillPromptAugmentAdvisor,
+                                  ToolCallback readSkillToolCallback,
+                                  ToolCallback shellToolCallback) {
         return ChatClient.builder(chatModel)
                 .defaultSystem("You are a helpful assistant with long-term memory. " +
                         "Use the provided user memory and conversation context to give personalized responses.")
@@ -67,8 +72,12 @@ public class MemoryConfig {
                         longTermMemoryAdvisor,
                         // RAG知识检索：从用户知识库检索相关文档片段注入prompt
                         ragAdvisor,
+                        // Skill技能发现：注入技能列表到系统提示
+                        skillPromptAugmentAdvisor,
                         new SimpleLoggerAdvisor()
                 )
+                // read_skill: 读取 SKILL.md | shell: 执行 Shell/Python 脚本
+                .defaultToolCallbacks(readSkillToolCallback, shellToolCallback)
                 .build();
     }
 }

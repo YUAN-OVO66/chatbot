@@ -87,3 +87,6 @@ chatbot:
         config:
           api-key: ${QIANFAN_API_KEY}
           top-k: 5
+  skills:
+    directory: classpath:skills
+    auto-reload: true
