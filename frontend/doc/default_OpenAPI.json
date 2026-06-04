@@ -1,0 +1,1411 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Chatbot Long-Term Memory API",
+    "description": "聊天机器人长期记忆模块接口文档，包含聊天、会话管理、记忆管理等接口",
+    "contact": {
+      "name": "iflytek",
+      "email": "dev@iflytek.com"
+    },
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Generated server url"
+    }
+  ],
+  "tags": [
+    {
+      "name": "聊天接口",
+      "description": "发送消息、多轮对话"
+    },
+    {
+      "name": "RAG 知识库",
+      "description": "上传、查看、删除知识库文档"
+    },
+    {
+      "name": "记忆管理",
+      "description": "查看、删除长期记忆事实，管理用户偏好"
+    },
+    {
+      "name": "会话管理",
+      "description": "创建、查询、归档会话"
+    },
+    {
+      "name": "插件管理",
+      "description": "查看和管理确定性插件"
+    },
+    {
+      "name": "技能管理",
+      "description": "查看和管理 LLM 可用的技能"
+    }
+  ],
+  "paths": {
+    "/api/plugins/{name}/enable": {
+      "put": {
+        "tags": [
+          "插件管理"
+        ],
+        "summary": "启用插件",
+        "operationId": "enablePlugin",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "插件名称",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins/{name}/disable": {
+      "put": {
+        "tags": [
+          "插件管理"
+        ],
+        "summary": "禁用插件",
+        "operationId": "disablePlugin",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "插件名称",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/preferences": {
+      "get": {
+        "tags": [
+          "记忆管理"
+        ],
+        "summary": "偏好列表",
+        "description": "获取指定用户的所有偏好设置，按置信度降序排列",
+        "operationId": "listPreferences",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListUserPreference"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "记忆管理"
+        ],
+        "summary": "设置偏好",
+        "description": "手动设置或更新用户偏好，来源标记为explicit，置信度为1.0",
+        "operationId": "setPreference",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultUserPreference"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/reload": {
+      "post": {
+        "tags": [
+          "技能管理"
+        ],
+        "summary": "重新加载技能",
+        "operationId": "reload",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultString"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions": {
+      "get": {
+        "tags": [
+          "会话管理"
+        ],
+        "summary": "会话列表",
+        "description": "分页查询指定用户的所有活跃会话",
+        "operationId": "listSessions",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageSessionResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "会话管理"
+        ],
+        "summary": "创建会话",
+        "description": "为指定用户创建一个新的聊天会话",
+        "operationId": "createSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultSessionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rag/upload": {
+      "post": {
+        "tags": [
+          "RAG 知识库"
+        ],
+        "summary": "上传知识文档",
+        "description": "上传 PDF/TXT/MD 文件到用户知识库，系统自动分块向量化",
+        "operationId": "upload",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultRagDocumentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/consolidate": {
+      "post": {
+        "tags": [
+          "记忆管理"
+        ],
+        "summary": "整合记忆",
+        "description": "触发记忆整合，去除重复和矛盾的记忆事实",
+        "operationId": "consolidate",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "tags": [
+          "聊天接口"
+        ],
+        "summary": "发送消息",
+        "description": "发送一条消息并获取AI回复，支持多轮对话记忆",
+        "operationId": "chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultChatResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/stream": {
+      "post": {
+        "tags": [
+          "聊天接口"
+        ],
+        "summary": "流式发送消息",
+        "description": "SSE流式返回AI回复，支持多轮对话记忆",
+        "operationId": "stream",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/SseEmitter"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills": {
+      "get": {
+        "tags": [
+          "技能管理"
+        ],
+        "summary": "列出所有已注册的技能",
+        "operationId": "listSkills",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListSkillMetadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/{name}": {
+      "get": {
+        "tags": [
+          "技能管理"
+        ],
+        "summary": "获取指定技能详情",
+        "operationId": "getSkill",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultSkillMetadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/{name}/content": {
+      "get": {
+        "tags": [
+          "技能管理"
+        ],
+        "summary": "读取技能的 SKILL.md 内容",
+        "operationId": "readSkillContent",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultString"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{sessionId}": {
+      "get": {
+        "tags": [
+          "会话管理"
+        ],
+        "summary": "会话详情",
+        "description": "根据会话ID获取会话详细信息",
+        "operationId": "getSession",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultSessionResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "会话管理"
+        ],
+        "summary": "归档会话",
+        "description": "将指定会话标记为已归档，不再显示在列表中",
+        "operationId": "archiveSession",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rag/documents": {
+      "get": {
+        "tags": [
+          "RAG 知识库"
+        ],
+        "summary": "文档列表",
+        "description": "获取指定用户的所有知识库文档",
+        "operationId": "listDocuments",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListRagDocumentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins": {
+      "get": {
+        "tags": [
+          "插件管理"
+        ],
+        "summary": "列出所有插件",
+        "operationId": "listPlugins",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListPluginInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/facts": {
+      "get": {
+        "tags": [
+          "记忆管理"
+        ],
+        "summary": "记忆事实列表",
+        "description": "获取指定用户的所有长期记忆事实，按重要性降序排列",
+        "operationId": "listFacts",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListUserMemoryFact"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/history": {
+      "get": {
+        "tags": [
+          "聊天接口"
+        ],
+        "summary": "历史消息",
+        "description": "获取指定会话的所有历史聊天记录",
+        "operationId": "history",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListChatMessage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rag/documents/{documentId}": {
+      "delete": {
+        "tags": [
+          "RAG 知识库"
+        ],
+        "summary": "删除知识文档",
+        "description": "删除指定文档及其所有向量数据",
+        "operationId": "deleteDocument",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/facts/{factId}": {
+      "delete": {
+        "tags": [
+          "记忆管理"
+        ],
+        "summary": "删除记忆事实",
+        "description": "软删除一条记忆事实，不会从数据库物理删除",
+        "operationId": "deleteFact",
+        "parameters": [
+          {
+            "name": "factId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ResultVoid": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "type": "object",
+            "description": "响应数据"
+          }
+        }
+      },
+      "PreferenceRequest": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "preferenceKey": {
+            "type": "string"
+          },
+          "preferenceValue": {
+            "type": "string"
+          }
+        }
+      },
+      "ResultUserPreference": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "$ref": "#/components/schemas/UserPreference",
+            "description": "响应数据"
+          }
+        }
+      },
+      "UserPreference": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "preferenceKey": {
+            "type": "string"
+          },
+          "preferenceValue": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "documentId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ResultString": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "type": "string",
+            "description": "响应数据"
+          }
+        }
+      },
+      "SessionCreateRequest": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          }
+        }
+      },
+      "ResultSessionResponse": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SessionResponse",
+            "description": "响应数据"
+          }
+        }
+      },
+      "SessionResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RagDocumentResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "fileType": {
+            "type": "string"
+          },
+          "fileSize": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string"
+          },
+          "chunkCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ResultRagDocumentResponse": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RagDocumentResponse",
+            "description": "响应数据"
+          }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "refType": null
+          },
+          "userId": {
+            "type": "string",
+            "refType": null
+          },
+          "message": {
+            "type": "string",
+            "refType": null
+          }
+        }
+      },
+      "ChatResponse": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "refType": null
+          },
+          "reply": {
+            "type": "string",
+            "refType": null
+          },
+          "retrievedMemoryFacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "refType": "string"
+          }
+        }
+      },
+      "ResultChatResponse": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ChatResponse",
+            "description": "响应数据"
+          }
+        }
+      },
+      "SseEmitter": {
+        "type": "object",
+        "properties": {
+          "timeout": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ResultListSkillMetadata": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "type": "array",
+            "description": "响应数据",
+            "items": {
+              "$ref": "#/components/schemas/SkillMetadata"
+            }
+          }
+        }
+      },
+      "SkillMetadata": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "skillPath": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "fullContent": {
+            "type": "string"
+          }
+        }
+      },
+      "ResultSkillMetadata": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SkillMetadata",
+            "description": "响应数据"
+          }
+        }
+      },
+      "PageSessionResponse": {
+        "type": "object",
+        "properties": {
+          "totalPages": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalElements": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionResponse"
+            }
+          },
+          "number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sort": {
+            "$ref": "#/components/schemas/SortObject"
+          },
+          "first": {
+            "type": "boolean"
+          },
+          "last": {
+            "type": "boolean"
+          },
+          "numberOfElements": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageable": {
+            "$ref": "#/components/schemas/PageableObject"
+          },
+          "empty": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PageableObject": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sort": {
+            "$ref": "#/components/schemas/SortObject"
+          },
+          "paged": {
+            "type": "boolean"
+          },
+          "pageNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unpaged": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ResultPageSessionResponse": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PageSessionResponse",
+            "description": "响应数据"
+          }
+        }
+      },
+      "SortObject": {
+        "type": "object",
+        "properties": {
+          "empty": {
+            "type": "boolean"
+          },
+          "sorted": {
+            "type": "boolean"
+          },
+          "unsorted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ResultListRagDocumentResponse": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "type": "array",
+            "description": "响应数据",
+            "items": {
+              "$ref": "#/components/schemas/RagDocumentResponse"
+            }
+          }
+        }
+      },
+      "PluginInfo": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "order": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ResultListPluginInfo": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "type": "array",
+            "description": "响应数据",
+            "items": {
+              "$ref": "#/components/schemas/PluginInfo"
+            }
+          }
+        }
+      },
+      "ResultListUserPreference": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "type": "array",
+            "description": "响应数据",
+            "items": {
+              "$ref": "#/components/schemas/UserPreference"
+            }
+          }
+        }
+      },
+      "ResultListUserMemoryFact": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "type": "array",
+            "description": "响应数据",
+            "items": {
+              "$ref": "#/components/schemas/UserMemoryFact"
+            }
+          }
+        }
+      },
+      "UserMemoryFact": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "conversationId": {
+            "type": "string"
+          },
+          "factText": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "string",
+            "format": "byte"
+          },
+          "documentId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "ResultListChatMessage": {
+        "type": "object",
+        "description": "统一响应结果",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "状态码，200表示成功",
+            "example": 200
+          },
+          "message": {
+            "type": "string",
+            "description": "响应提示信息",
+            "example": "操作成功"
+          },
+          "data": {
+            "type": "array",
+            "description": "响应数据",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-openapi": {
+    "x-markdownFiles": []
+  }
+}
