@@ -10,6 +10,7 @@ export interface Message {
   content: string
   loading?: boolean
   placement: 'start' | 'end'
+  maxWidth: string
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -62,7 +63,6 @@ export const useChatStore = defineStore('chat', () => {
   async function switchSession(sessionId: string) {
     if (currentSessionId.value === sessionId) return
     currentSessionId.value = sessionId
-    messages.value = []
     await loadHistory(sessionId)
   }
 
@@ -73,6 +73,7 @@ export const useChatStore = defineStore('chat', () => {
       role: item.role,
       content: item.content,
       placement: item.role === 'user' ? 'end' : 'start',
+      maxWidth: item.role === 'user' ? '70%' : '85%',
     }))
   }
 
@@ -102,10 +103,10 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     // 追加用户消息
-    messages.value.push({ role: 'user', content, placement: 'end' })
+    messages.value.push({ role: 'user', content, placement: 'end', maxWidth: '70%' })
 
     // 追加空的 assistant 消息（loading 始终为 false，保持内容插槽可见）
-    messages.value.push({ role: 'assistant', content: '', loading: false, placement: 'start' })
+    messages.value.push({ role: 'assistant', content: '', loading: false, placement: 'start', maxWidth: '85%' })
     const msgIndex = messages.value.length - 1
 
     loading.value = true
@@ -149,6 +150,18 @@ export const useChatStore = defineStore('chat', () => {
     loading.value = false
   }
 
+  // 重置状态
+  function $reset() {
+    stopGeneration()
+    sessions.value = []
+    currentSessionId.value = null
+    messages.value = []
+    loading.value = false
+    sessionsLoading.value = false
+    sessionsPage.value = 0
+    sessionsTotal.value = 0
+  }
+
   return {
     sessions,
     currentSessionId,
@@ -164,5 +177,6 @@ export const useChatStore = defineStore('chat', () => {
     deleteSession,
     sendMessage,
     stopGeneration,
+    $reset,
   }
 })

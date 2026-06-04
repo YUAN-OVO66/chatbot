@@ -44,6 +44,7 @@ function handlePromptClick(item: PromptsItemsProps) {
   justify-content: center;
   height: 100%;
   padding: 40px 20px;
-  gap: 32px;
+  gap: 40px;
+  background: linear-gradient(180deg, var(--color-bg) 0%, var(--color-surface) 100%);
 }
 </style>

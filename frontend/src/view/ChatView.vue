@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
+import { ElMessageBox } from 'element-plus'
 import ChatSidebar from '@/components/ChatSidebar.vue'
 import ChatMain from '@/components/ChatMain.vue'
 import ManagementPanel from '@/components/ManagementPanel.vue'
 
+const router = useRouter()
 const userStore = useUserStore()
 const chatStore = useChatStore()
 const showManagement = ref(false)
@@ -27,6 +30,17 @@ onMounted(async () => {
     await chatStore.switchSession(chatStore.sessions[0].id)
   }
 })
+
+async function handleSwitchUser() {
+  await ElMessageBox.confirm('切换用户将清除当前会话数据，是否继续？', '切换用户', {
+    confirmButtonText: '确认切换',
+    cancelButtonText: '取消',
+    type: 'warning',
+  })
+  userStore.clearUser()
+  chatStore.$reset()
+  router.replace('/login')
+}
 </script>
 
 <template>
@@ -37,9 +51,9 @@ onMounted(async () => {
         <el-button link @click="showManagement = true">
           管理面板
         </el-button>
-        <span class="user-id" :title="userStore.userId">
-          ID: {{ userStore.userId?.slice(0, 8) }}...
-        </span>
+        <el-button link @click="handleSwitchUser">
+          切换用户
+        </el-button>
       </div>
     </aside>
     <main class="main">
@@ -63,30 +77,36 @@ onMounted(async () => {
   display: flex;
   height: 100vh;
   overflow: hidden;
+  background: var(--color-bg);
 }
 
 .sidebar {
-  width: 260px;
+  width: 280px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
 }
 
 .sidebar-footer {
-  padding: 8px 12px;
-  border-top: 1px solid #e4e7ed;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-size: 12px;
-  color: #909399;
+  color: var(--color-text-secondary);
 }
 
-.user-id {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 120px;
+.sidebar-footer .el-button {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  transition: color var(--transition);
+}
+
+.sidebar-footer .el-button:hover {
+  color: var(--color-primary);
 }
 
 .main {

@@ -64,16 +64,26 @@ function handleLoadMore() {
   display: flex;
   flex-direction: column;
   height: 100%;
-  border-right: 1px solid #e4e7ed;
-  background: #fafafa;
+  background: var(--color-surface);
 }
 
 .sidebar-header {
-  padding: 12px;
-  border-bottom: 1px solid #e4e7ed;
+  padding: 16px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .new-chat-btn {
   width: 100%;
+  height: 40px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  transition: all var(--transition);
+}
+
+.new-chat-btn:hover {
+  background: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
 }
 </style>

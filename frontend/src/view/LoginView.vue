@@ -97,32 +97,35 @@ function recoverUser() {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, var(--color-primary-dark) 0%, var(--color-primary) 50%, #4F46E5 100%);
 }
 
 .login-card {
   width: 420px;
   padding: 48px 40px;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg), 0 0 80px rgba(124, 58, 237, 0.15);
 }
 
 .login-header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 36px;
 }
 
 .login-header h1 {
-  font-size: 28px;
-  color: #303133;
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--color-text);
   margin: 0 0 8px;
+  letter-spacing: -0.5px;
 }
 
 .subtitle {
-  color: #909399;
-  font-size: 14px;
+  color: var(--color-text-secondary);
+  font-size: 15px;
   margin: 0;
+  font-weight: 400;
 }
 
 .login-body {
@@ -130,9 +133,9 @@ function recoverUser() {
 }
 
 .welcome-text {
-  color: #606266;
-  font-size: 15px;
-  margin-bottom: 24px;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  margin-bottom: 28px;
   line-height: 1.6;
 }
 
@@ -140,11 +143,27 @@ function recoverUser() {
   width: 100%;
   height: 48px;
   font-size: 16px;
-  border-radius: 8px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  transition: all var(--transition);
+}
+
+.start-btn:hover {
+  background: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.3);
 }
 
 .recover-section {
-  margin-top: 20px;
+  margin-top: 24px;
+}
+
+.recover-section .el-button {
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 
 .recover-form {

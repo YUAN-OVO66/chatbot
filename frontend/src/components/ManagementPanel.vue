@@ -100,11 +100,34 @@ async function handleDeleteFact(fact: MemoryFact) {
   await loadData()
 }
 
+async function copyUserId() {
+  if (userStore.userId) {
+    await navigator.clipboard.writeText(userStore.userId)
+    ElMessage.success('已复制用户 ID')
+  }
+}
+
 onMounted(loadData)
 </script>
 
 <template>
   <div class="management-panel">
+    <div class="user-info">
+      <span class="user-label">用户 ID</span>
+      <el-input
+        :model-value="userStore.userId || ''"
+        readonly
+        size="small"
+        class="user-id-input"
+      >
+        <template #append>
+          <el-button @click="copyUserId">
+            复制
+          </el-button>
+        </template>
+      </el-input>
+    </div>
+
     <el-tabs v-model="activeTab" @tab-change="loadData">
       <!-- RAG 知识库 -->
       <el-tab-pane label="知识库" name="rag">
@@ -183,7 +206,53 @@ onMounted(loadData)
 
 <style scoped>
 .management-panel {
-  padding: 16px;
+  padding: 20px;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.user-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.user-id-input :deep(.el-input__inner) {
+  font-family: 'JetBrains Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+  color: var(--color-text);
+}
+
+.user-id-input :deep(.el-input-group__append) {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.user-id-input :deep(.el-input-group__append:hover) {
+  background: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
+}
+
+.management-panel :deep(.el-tabs__item) {
+  font-weight: 500;
+}
+
+.management-panel :deep(.el-tabs__item.is-active) {
+  color: var(--color-primary);
+}
+
+.management-panel :deep(.el-tabs__active-bar) {
+  background-color: var(--color-primary);
 }
 
 .tab-header {
@@ -193,8 +262,35 @@ onMounted(loadData)
   margin-bottom: 16px;
 }
 
+.tab-header .el-button {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
 .hint {
-  color: #909399;
+  color: var(--color-text-secondary);
   font-size: 13px;
+}
+
+.management-panel h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 12px;
+}
+
+.management-panel :deep(.el-table) {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.management-panel :deep(.el-table th) {
+  background: #F9FAFB;
+  font-weight: 600;
+}
+
+.management-panel :deep(.el-switch.is-checked .el-switch__core) {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
 }
 </style>
