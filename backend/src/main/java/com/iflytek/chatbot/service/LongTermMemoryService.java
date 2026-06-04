@@ -143,37 +143,85 @@ public class LongTermMemoryService {
 
             int extractedCount = 0;
 
-            // 步骤5: 持久化事实（已存在则更新重要性，不存在则新建）
+            // 步骤5: 持久化事实（语义去重 + 精确去重）
             for (Map<String, Object> factData : facts) {
                 String text = (String) factData.get("text");
                 String category = (String) factData.getOrDefault("category", "general");
                 byte importance = ((Number) factData.getOrDefault("importance", 5)).byteValue();
 
-                Optional<UserMemoryFact> existing = factRepository
+                // 5a. 精确匹配去重
+                Optional<UserMemoryFact> exactMatch = factRepository
                         .findByUserIdAndFactTextAndIsActive(userId, text, true);
 
-                if (existing.isPresent()) {
-                    UserMemoryFact fact = existing.get();
+                if (exactMatch.isPresent()) {
+                    UserMemoryFact fact = exactMatch.get();
                     if (importance > fact.getImportance()) {
                         fact.setImportance(importance);
                         factRepository.save(fact);
-                        log.info("[Extract] 步骤5: 事实已存在, 更新重要性 | id={}, importance {}→{}", fact.getId(), fact.getImportance(), importance);
+                        log.info("[Extract] 步骤5: 精确匹配已存在, 更新重要性 | id={}, importance {}→{}", fact.getId(), fact.getImportance(), importance);
                     } else {
-                        log.info("[Extract] 步骤5: 事实已存在, 跳过 | id={}, text={}", fact.getId(), text);
+                        log.info("[Extract] 步骤5: 精确匹配已存在, 跳过 | id={}, text={}", fact.getId(), text);
                     }
-                } else {
-                    UserMemoryFact fact = new UserMemoryFact();
-                    fact.setUserId(userId);
-                    fact.setConversationId(conversationId);
-                    fact.setFactText(text);
-                    fact.setCategory(category);
-                    fact.setImportance(importance);
-                    fact = factRepository.save(fact);
-                    log.info("[Extract] 步骤5: 新事实存入 MySQL | id={}, category={}, text={}", fact.getId(), category, text);
-
-                    semanticMemoryService.storeFactDocument(userId, text, category, importance, fact.getId());
-                    log.info("[Extract] 步骤5: 事实向量化存入 Milvus | factId={}", fact.getId());
+                    extractedCount++;
+                    continue;
                 }
+
+                // 5b. 语义相似度去重：在 Milvus 中检索相似事实
+                boolean isDuplicate = false;
+                try {
+                    List<org.springframework.ai.document.Document> similarDocs =
+                            semanticMemoryService.searchRelevantFacts(userId, text, 1);
+
+                    if (!similarDocs.isEmpty()) {
+                        org.springframework.ai.document.Document similarDoc = similarDocs.get(0);
+                        String similarText = similarDoc.getText();
+
+                        // 计算文本相似度（基于归一化编辑距离 + 关键词重叠）
+                        double similarity = calculateTextSimilarity(text, similarText);
+                        log.info("[Extract] 步骤5: 语义去重检查 | new=\"{}\", exist=\"{}\", similarity={}",
+                                text, similarText, similarity);
+
+                        if (similarity >= 0.75) {
+                            // 高度相似，视为重复
+                            Object factIdObj = similarDoc.getMetadata().get("factId");
+                            if (factIdObj != null) {
+                                Long existingFactId = Long.parseLong(factIdObj.toString());
+                                Optional<UserMemoryFact> existingOpt = factRepository.findById(existingFactId);
+                                if (existingOpt.isPresent() && existingOpt.get().getIsActive()) {
+                                    UserMemoryFact existing = existingOpt.get();
+                                    if (importance > existing.getImportance()) {
+                                        existing.setImportance(importance);
+                                        factRepository.save(existing);
+                                        log.info("[Extract] 步骤5: 语义重复, 更新重要性 | id={}, text=\"{}\"", existing.getId(), existing.getFactText());
+                                    } else {
+                                        log.info("[Extract] 步骤5: 语义重复, 跳过 | exist=\"{}\"", existing.getFactText());
+                                    }
+                                    isDuplicate = true;
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("[Extract] 步骤5: 语义去重检查失败, 降级为直接插入 | error={}", e.getMessage());
+                }
+
+                if (isDuplicate) {
+                    extractedCount++;
+                    continue;
+                }
+
+                // 5c. 无重复，新建事实
+                UserMemoryFact fact = new UserMemoryFact();
+                fact.setUserId(userId);
+                fact.setConversationId(conversationId);
+                fact.setFactText(text);
+                fact.setCategory(category);
+                fact.setImportance(importance);
+                fact = factRepository.save(fact);
+                log.info("[Extract] 步骤5: 新事实存入 MySQL | id={}, category={}, text={}", fact.getId(), category, text);
+
+                semanticMemoryService.storeFactDocument(userId, text, category, importance, fact.getId());
+                log.info("[Extract] 步骤5: 事实向量化存入 Milvus | factId={}", fact.getId());
                 extractedCount++;
             }
 
@@ -214,17 +262,102 @@ public class LongTermMemoryService {
         List<UserMemoryFact> facts = factRepository
                 .findByUserIdAndIsActiveOrderByImportanceDescCreatedAtDesc(userId, true);
 
+        // 标记已删除的 fact id，避免处理过程中重复比较
+        java.util.Set<Long> removedIds = new java.util.HashSet<>();
         int removed = 0;
+
         for (int i = 0; i < facts.size(); i++) {
+            if (removedIds.contains(facts.get(i).getId())) continue;
+
             for (int j = i + 1; j < facts.size(); j++) {
-                if (facts.get(i).getFactText().equalsIgnoreCase(facts.get(j).getFactText())) {
-                    facts.get(j).setIsActive(false);
-                    factRepository.save(facts.get(j));
+                if (removedIds.contains(facts.get(j).getId())) continue;
+
+                UserMemoryFact fi = facts.get(i);
+                UserMemoryFact fj = facts.get(j);
+
+                // 精确匹配 或 语义相似度 >= 0.75 视为重复
+                boolean isDuplicate = fi.getFactText().equalsIgnoreCase(fj.getFactText());
+                if (!isDuplicate) {
+                    double sim = calculateTextSimilarity(fi.getFactText(), fj.getFactText());
+                    if (sim >= 0.75) {
+                        isDuplicate = true;
+                        log.info("[Memory] 语义重复 | \"{}\" vs \"{}\" (sim={})", fi.getFactText(), fj.getFactText(), sim);
+                    }
+                }
+
+                if (isDuplicate) {
+                    fj.setIsActive(false);
+                    factRepository.save(fj);
+                    removedIds.add(fj.getId());
                     removed++;
                 }
             }
         }
         log.info("[Memory] 记忆整合完成 | userId={}, 去除 {} 条重复事实", userId, removed);
+    }
+
+    /**
+     * 计算两段文本的相似度（0.0 ~ 1.0）
+     * 综合关键词重叠率和编辑距离
+     */
+    private double calculateTextSimilarity(String text1, String text2) {
+        if (text1.equals(text2)) return 1.0;
+
+        // 提取中文关键词（2-4字）和英文单词
+        java.util.Set<String> words1 = extractKeywords(text1);
+        java.util.Set<String> words2 = extractKeywords(text2);
+
+        if (words1.isEmpty() && words2.isEmpty()) {
+            return text1.equalsIgnoreCase(text2) ? 1.0 : 0.0;
+        }
+
+        // Jaccard 相似度
+        java.util.Set<String> intersection = new java.util.HashSet<>(words1);
+        intersection.retainAll(words2);
+        java.util.Set<String> union = new java.util.HashSet<>(words1);
+        union.addAll(words2);
+        double jaccard = union.isEmpty() ? 0.0 : (double) intersection.size() / union.size();
+
+        // 归一化编辑距离
+        int maxLen = Math.max(text1.length(), text2.length());
+        double editSimilarity = maxLen == 0 ? 1.0 : 1.0 - ((double) editDistance(text1, text2) / maxLen);
+
+        // 加权: 关键词重叠占 70%, 编辑距离占 30%
+        return jaccard * 0.7 + editSimilarity * 0.3;
+    }
+
+    private java.util.Set<String> extractKeywords(String text) {
+        java.util.Set<String> words = new java.util.HashSet<>();
+        // 中文 2-4 字词
+        java.util.regex.Matcher cnMatcher = java.util.regex.Pattern.compile("[\\u4e00-\\u9fff]{2,4}").matcher(text);
+        while (cnMatcher.find()) {
+            words.add(cnMatcher.group());
+        }
+        // 英文单词
+        java.util.regex.Matcher enMatcher = java.util.regex.Pattern.compile("[a-zA-Z]+").matcher(text.toLowerCase());
+        while (enMatcher.find()) {
+            words.add(enMatcher.group());
+        }
+        return words;
+    }
+
+    private int editDistance(String s1, String s2) {
+        int m = s1.length(), n = s2.length();
+        int[] prev = new int[n + 1];
+        for (int j = 0; j <= n; j++) prev[j] = j;
+        for (int i = 1; i <= m; i++) {
+            int[] curr = new int[n + 1];
+            curr[0] = i;
+            for (int j = 1; j <= n; j++) {
+                if (s1.charAt(i - 1) == s2.charAt(j - 1)) {
+                    curr[j] = prev[j - 1];
+                } else {
+                    curr[j] = 1 + Math.min(prev[j - 1], Math.min(prev[j], curr[j - 1]));
+                }
+            }
+            prev = curr;
+        }
+        return prev[n];
     }
 
     private String buildConversationText(List<Message> messages) {
