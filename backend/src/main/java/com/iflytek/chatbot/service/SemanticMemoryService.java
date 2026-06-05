@@ -110,4 +110,13 @@ public class SemanticMemoryService {
         vectorStore.delete("conversationId == '" + conversationId + "'");
         log.info("[Milvus] 会话向量文档删除完成 | conversationId={}", conversationId);
     }
+
+    /**
+     * 删除指定事实的向量文档
+     */
+    public void deleteFactDocument(Long factId) {
+        log.info("[Milvus] 删除事实向量文档 | factId={}", factId);
+        vectorStore.delete("factId == '" + factId + "'");
+        log.info("[Milvus] 事实向量文档删除完成 | factId={}", factId);
+    }
 }

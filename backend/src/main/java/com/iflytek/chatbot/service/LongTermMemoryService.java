@@ -166,23 +166,35 @@ public class LongTermMemoryService {
                     continue;
                 }
 
-                // 5b. 语义相似度去重：在 Milvus 中检索相似事实
+                // 5b. 语义相似度去重：在 Milvus 中检索 top-5 相似事实
                 boolean isDuplicate = false;
                 try {
                     List<org.springframework.ai.document.Document> similarDocs =
-                            semanticMemoryService.searchRelevantFacts(userId, text, 1);
+                            semanticMemoryService.searchRelevantFacts(userId, text, 5);
 
-                    if (!similarDocs.isEmpty()) {
-                        org.springframework.ai.document.Document similarDoc = similarDocs.get(0);
-                        String similarText = similarDoc.getText();
+                    for (org.springframework.ai.document.Document similarDoc : similarDocs) {
+                        // 优先使用 Milvus 向量余弦相似度
+                        Double vectorScore = null;
+                        Object scoreObj = similarDoc.getMetadata().get("score");
+                        if (scoreObj instanceof Number) {
+                            vectorScore = ((Number) scoreObj).doubleValue();
+                        }
 
-                        // 计算文本相似度（基于归一化编辑距离 + 关键词重叠）
-                        double similarity = calculateTextSimilarity(text, similarText);
-                        log.info("[Extract] 步骤5: 语义去重检查 | new=\"{}\", exist=\"{}\", similarity={}",
-                                text, similarText, similarity);
+                        double similarity;
+                        if (vectorScore != null) {
+                            similarity = vectorScore;
+                        } else {
+                            // fallback: 手工文本相似度
+                            similarity = calculateTextSimilarity(text, similarDoc.getText());
+                        }
 
-                        if (similarity >= 0.75) {
-                            // 高度相似，视为重复
+                        log.info("[Extract] 步骤5: 语义去重检查 | new=\"{}\", exist=\"{}\", similarity={}, source={}",
+                                text.length() > 30 ? text.substring(0, 30) + "..." : text,
+                                similarDoc.getText().length() > 30 ? similarDoc.getText().substring(0, 30) + "..." : similarDoc.getText(),
+                                String.format("%.4f", similarity),
+                                vectorScore != null ? "vector" : "text");
+
+                        if (similarity >= 0.85) {
                             Object factIdObj = similarDoc.getMetadata().get("factId");
                             if (factIdObj != null) {
                                 Long existingFactId = Long.parseLong(factIdObj.toString());
@@ -197,12 +209,14 @@ public class LongTermMemoryService {
                                         log.info("[Extract] 步骤5: 语义重复, 跳过 | exist=\"{}\"", existing.getFactText());
                                     }
                                     isDuplicate = true;
+                                    break;
                                 }
                             }
                         }
                     }
                 } catch (Exception e) {
-                    log.warn("[Extract] 步骤5: 语义去重检查失败, 降级为直接插入 | error={}", e.getMessage());
+                    log.warn("[Extract] 步骤5: 语义去重检查失败, 跳过该事实以避免重复 | error={}", e.getMessage());
+                    continue;
                 }
 
                 if (isDuplicate) {
@@ -247,6 +261,13 @@ public class LongTermMemoryService {
             extractionLog.setStatus("success");
             log.info("[Extract] ========== 事实提取完成 | 共提取 {} 条 ==========", extractedCount);
 
+            // 提取后自动整合，清理可能产生的重复
+            try {
+                consolidateMemories(userId);
+            } catch (Exception e) {
+                log.warn("[Extract] 提取后自动整合失败 | error={}", e.getMessage());
+            }
+
         } catch (Exception e) {
             extractionLog.setStatus("failed");
             extractionLog.setErrorMessage(e.getMessage());
@@ -288,6 +309,11 @@ public class LongTermMemoryService {
                 if (isDuplicate) {
                     fj.setIsActive(false);
                     factRepository.save(fj);
+                    try {
+                        semanticMemoryService.deleteFactDocument(fj.getId());
+                    } catch (Exception e) {
+                        log.warn("[Memory] 整合时删除向量失败 | factId={}", fj.getId());
+                    }
                     removedIds.add(fj.getId());
                     removed++;
                 }
@@ -370,5 +396,98 @@ public class LongTermMemoryService {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * 手动创建记忆事实（含语义去重 + 向量化存储）
+     */
+    @Transactional
+    public UserMemoryFact createFact(String userId, String factText, String category, Byte importance) {
+        log.info("[Memory] 手动创建事实 | userId={}, category={}, text={}", userId, category, factText);
+
+        // 精确匹配去重
+        Optional<UserMemoryFact> exactMatch = factRepository
+                .findByUserIdAndFactTextAndIsActive(userId, factText, true);
+        if (exactMatch.isPresent()) {
+            log.info("[Memory] 精确匹配已存在, 返回已有事实 | id={}", exactMatch.get().getId());
+            return exactMatch.get();
+        }
+
+        // 语义去重
+        try {
+            List<org.springframework.ai.document.Document> similarDocs =
+                    semanticMemoryService.searchRelevantFacts(userId, factText, 5);
+            for (org.springframework.ai.document.Document doc : similarDocs) {
+                Double score = null;
+                Object scoreObj = doc.getMetadata().get("score");
+                if (scoreObj instanceof Number) {
+                    score = ((Number) scoreObj).doubleValue();
+                }
+                double similarity = score != null ? score : calculateTextSimilarity(factText, doc.getText());
+                if (similarity >= 0.85) {
+                    Object factIdObj = doc.getMetadata().get("factId");
+                    if (factIdObj != null) {
+                        Optional<UserMemoryFact> existing = factRepository.findById(Long.parseLong(factIdObj.toString()));
+                        if (existing.isPresent() && existing.get().getIsActive()) {
+                            log.info("[Memory] 语义重复, 返回已有事实 | id={}, similarity={}", existing.get().getId(), String.format("%.4f", similarity));
+                            return existing.get();
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[Memory] 语义去重检查失败 | error={}", e.getMessage());
+        }
+
+        // 创建新事实
+        UserMemoryFact fact = new UserMemoryFact();
+        fact.setUserId(userId);
+        fact.setFactText(factText);
+        fact.setCategory(category != null ? category : "general");
+        fact.setImportance(importance != null ? importance : 5);
+        fact = factRepository.save(fact);
+
+        // 向量化存储
+        try {
+            semanticMemoryService.storeFactDocument(userId, factText, fact.getCategory(), fact.getImportance(), fact.getId());
+        } catch (Exception e) {
+            log.warn("[Memory] 向量化存储失败, MySQL 记录已保存 | error={}", e.getMessage());
+        }
+
+        log.info("[Memory] 事实创建完成 | id={}, text={}", fact.getId(), factText);
+        return fact;
+    }
+
+    /**
+     * 更新记忆事实（文本/分类/重要性变更时重新向量化）
+     */
+    @Transactional
+    public UserMemoryFact updateFact(Long factId, String factText, String category, Byte importance) {
+        log.info("[Memory] 更新事实 | factId={}", factId);
+
+        UserMemoryFact fact = factRepository.findById(factId)
+                .orElseThrow(() -> new RuntimeException("事实不存在: " + factId));
+
+        boolean textChanged = factText != null && !factText.equals(fact.getFactText());
+
+        if (factText != null) fact.setFactText(factText);
+        if (category != null) fact.setCategory(category);
+        if (importance != null) fact.setImportance(importance);
+        fact = factRepository.save(fact);
+
+        // 文本变更时：先删旧向量，再存新向量
+        if (textChanged) {
+            try {
+                semanticMemoryService.deleteFactDocument(factId);
+                semanticMemoryService.storeFactDocument(
+                        fact.getUserId(), fact.getFactText(), fact.getCategory(), fact.getImportance(), fact.getId());
+                log.info("[Memory] 事实向量化已更新 | factId={}", factId);
+            } catch (Exception e) {
+                log.warn("[Memory] 重新向量化失败 | error={}", e.getMessage());
+            }
+        }
+
+        log.info("[Memory] 事实更新完成 | factId={}", factId);
+        return fact;
     }
 }

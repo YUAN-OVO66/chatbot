@@ -24,7 +24,7 @@ import java.util.Set;
 public class RagService {
 
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
-    private static final long MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+    private static final long MAX_FILE_SIZE = 30 * 1024 * 1024; // 20MB
     private static final Set<String> ALLOWED_TYPES = Set.of("pdf", "txt", "md");
 
     private final RagDocumentRepository ragDocumentRepository;

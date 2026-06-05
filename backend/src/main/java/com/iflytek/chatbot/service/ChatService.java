@@ -19,6 +19,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -96,6 +97,9 @@ public class ChatService {
 
         return new ChatResponse(sessionId, reply);
     }
+
+    /** 记录每个 session 上次提取时的消息数，用于节流 */
+    private final ConcurrentHashMap<String, Integer> lastExtractedSize = new ConcurrentHashMap<>();
 
     private static final int MAX_STREAM_RETRIES = 3;
     private static final long[] RETRY_DELAYS_MS = {1000, 2000, 3000};
@@ -296,16 +300,19 @@ public class ChatService {
             semanticMemoryService.storeConversationChunk(userId, sessionId, userMessage, assistantReply);
             log.info("[Async] 步骤1: 对话片段存储完成 | sessionId={}", sessionId);
 
-            // 判断是否需要提取事实
+            // 判断是否需要提取事实（节流：每新增 4 条消息才触发一次）
             List<Message> messages = chatMemory.get(sessionId);
-            log.info("[Async] 步骤2: 当前会话消息数={} | sessionId={}", messages.size(), sessionId);
+            int currentSize = messages.size();
+            int lastSize = lastExtractedSize.getOrDefault(sessionId, 0);
+            log.info("[Async] 步骤2: 当前消息数={}, 上次提取时消息数={} | sessionId={}", currentSize, lastSize, sessionId);
 
-            if (messages.size() >= 4) {
-                log.info("[Async] 步骤3: 消息数>=4, 触发事实提取 | sessionId={}", sessionId);
+            if (currentSize >= 4 && currentSize - lastSize >= 4) {
+                log.info("[Async] 步骤3: 触发事实提取 | sessionId={}", sessionId);
                 longTermMemoryService.extractFacts(sessionId, userId, messages);
+                lastExtractedSize.put(sessionId, currentSize);
                 log.info("[Async] 步骤3: 事实提取完成 | sessionId={}", sessionId);
             } else {
-                log.info("[Async] 步骤3: 消息数不足4条, 跳过事实提取 | sessionId={}", sessionId);
+                log.info("[Async] 步骤3: 跳过事实提取（节流） | sessionId={}", sessionId);
             }
 
             log.info("[Async] ---- 异步后处理完成 | sessionId={}", sessionId);

@@ -21,4 +21,6 @@ public interface UserMemoryFactRepository extends JpaRepository<UserMemoryFact, 
     List<UserMemoryFact> findByUserIdAndCategoryAndIsActiveOrderByImportanceDesc(String userId, String category, Boolean isActive);
 
     List<UserMemoryFact> findByConversationIdAndIsActive(String conversationId, Boolean isActive);
+
+    long countByUserIdAndIsActive(String userId, Boolean isActive);
 }
