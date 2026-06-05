@@ -12,6 +12,8 @@ import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.PropertySource;
 
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
@@ -21,6 +23,12 @@ import java.util.concurrent.TimeUnit;
 public class SkillConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SkillConfig.class);
+
+    private final ConfigurableEnvironment environment;
+
+    public SkillConfig(ConfigurableEnvironment environment) {
+        this.environment = environment;
+    }
 
     @Bean
     public SkillRegistry skillRegistry(SkillConfigProperties properties) {
@@ -104,6 +112,16 @@ public class SkillConfig {
             ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
             pb.redirectErrorStream(true);
             pb.environment().put("PYTHONIOENCODING", "utf-8");
+
+            // 将 .env 中的变量注入子进程环境（供 Python 脚本通过 os.environ 读取）
+            for (PropertySource<?> ps : environment.getPropertySources()) {
+                if (ps.getName().equals("dotenv") && ps.getSource() instanceof java.util.Properties props) {
+                    for (String key : props.stringPropertyNames()) {
+                        pb.environment().put(key, props.getProperty(key));
+                    }
+                    break;
+                }
+            }
 
             Process process = pb.start();
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);

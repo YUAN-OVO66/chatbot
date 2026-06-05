@@ -18,6 +18,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -34,6 +35,13 @@ public class WebSearchPlugin implements ChatPlugin {
     private static final Logger log = LoggerFactory.getLogger(WebSearchPlugin.class);
     private static final String SEARCH_URL = "https://qianfan.baidubce.com/v2/ai_search/web_search";
     private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    /** 显式搜索意图关键词 */
+    private static final List<String> SEARCH_KEYWORDS = List.of(
+            "搜索", "搜一下", "帮我搜", "帮我查", "查找", "查一下",
+            "搜搜", "查询", "网上搜", "网上查", "百度", "谷歌",
+            "search", "look up", "google"
+    );
 
     private final PluginConfigProperties config;
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -65,17 +73,27 @@ public class WebSearchPlugin implements ChatPlugin {
             return answer;
         }
 
-        // 如果 LLM 已经给出了有效回复，不搜索
-        if (answer != null && !answer.isBlank()
-                && !answer.contains("抱歉") && !answer.contains("我不知道")) {
-            return answer;
+        boolean explicitSearch = hasExplicitSearchIntent(query);
+
+        // 如果用户明确要求搜索，无论 LLM 回复如何都执行搜索
+        if (!explicitSearch) {
+            // 否则，仅当 LLM 回复不足时才搜索
+            if (answer != null && !answer.isBlank()
+                    && !answer.contains("抱歉") && !answer.contains("我不知道")) {
+                return answer;
+            }
         }
 
-        log.info("[WebSearchPlugin] LLM 回复不足，调用百度 AI 搜索 | query={}", query);
+        log.info("[WebSearchPlugin] 调用百度 AI 搜索 | explicit={}, query={}", explicitSearch, query);
 
         try {
             String searchResult = doSearch(query);
             if (searchResult != null && !searchResult.isBlank()) {
+                // 显式搜索意图：用搜索结果替换 LLM 的回复（LLM 可能用了 shell 爬取，质量差）
+                // 非显式：追加到 LLM 回复后面
+                if (explicitSearch) {
+                    return "**网络搜索结果：**\n" + searchResult;
+                }
                 return (answer != null ? answer : "") + "\n\n**网络搜索结果：**\n" + searchResult;
             }
         } catch (Exception e) {
@@ -83,6 +101,14 @@ public class WebSearchPlugin implements ChatPlugin {
         }
 
         return answer;
+    }
+
+    private boolean hasExplicitSearchIntent(String query) {
+        if (query == null || query.isBlank()) {
+            return false;
+        }
+        String lower = query.toLowerCase();
+        return SEARCH_KEYWORDS.stream().anyMatch(lower::contains);
     }
 
     private String doSearch(String query) {

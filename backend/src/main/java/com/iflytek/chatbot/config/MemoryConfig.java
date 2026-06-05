@@ -69,6 +69,7 @@ public class MemoryConfig {
                         - ONLY use skills when the user explicitly asks you to perform a specific action (send email, execute code, check a server, etc.) that requires external execution.
                         - When in doubt, answer directly first. Only use skills if a direct answer is insufficient.
                         - NEVER read a SKILL.md or execute shell commands for simple informational questions.
+                        - For search-related queries (containing "搜索", "搜一下", "帮我查", "查找", "查一下", "search", "look up"), do NOT use shell/python to scrape websites. The web-search plugin will automatically handle search queries after you respond. Simply provide a brief acknowledgment like "正在为您搜索..." or answer based on what you know.
                         """)
                 .defaultAdvisors(
                         // 短期记忆：从MySQL读取最近对话消息注入prompt
