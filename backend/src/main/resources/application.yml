@@ -6,8 +6,8 @@ spring:
     name: chatbot
 
   datasource:
-    url: jdbc:mysql://sh-cynosdbmysql-grp-qf3gwiu4.sql.tencentcdb.com:22289/chatbot?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8
-    username: root
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8
+    username: ${MYSQL_USERNAME}
     password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
@@ -33,9 +33,9 @@ spring:
     vectorstore:
       milvus:
         client:
-          host: "124.222.138.117"
-          port: 19530
-        databaseName: "chatbot"
+          host: ${MILVUS_HOST}
+          port: ${MILVUS_PORT}
+        databaseName: ${MILVUS_DATABASE}
         collectionName: "user_memory"
         embeddingDimension: 1024
         indexType: IVF_FLAT
