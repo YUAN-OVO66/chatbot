@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: chatbot
+  servlet:
+    multipart:
+      max-file-size: 30MB
+      max-request-size: 30MB
 
   datasource:
     url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8
