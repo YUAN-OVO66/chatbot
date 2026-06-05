@@ -37,7 +37,7 @@
 内置插件：
 - **TimePlugin** - 时间查询
 - **CalculatorPlugin** - 数学计算
-- **WebSearchPlugin** - 网络搜索
+- **WebSearchPlugin** - 网络搜索（支持显式搜索意图识别，接入百度 AI 搜索）
 
 插件支持两个执行阶段：
 - `beforeRag` - 预处理，可短路跳过 LLM
@@ -46,7 +46,7 @@
 ### Skill 系统
 
 可扩展的技能模块，支持 Python 脚本执行：
-- 天气查询
+- 天气查询（接入和风天气 API，支持实时天气和 3 天预报）
 - 邮件发送
 - DevOps 工具（系统信息、进程监控、端口检测）
 - SQL 生成与验证
@@ -172,6 +172,9 @@ MYSQL_PASSWORD=your_password
 # Milvus
 MILVUS_HOST=localhost
 MILVUS_PORT=19530
+
+# 和风天气（天气 Skill）
+QWEATHER_API_KEY=your_qweather_api_key
 ```
 
 ### 3. 启动后端
@@ -230,8 +233,15 @@ pnpm build
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/memory/facts` | 获取用户事实 |
+| GET | `/api/memory/facts` | 获取用户事实（支持分类筛选） |
+| POST | `/api/memory/facts` | 手动创建事实（含语义去重） |
+| PUT | `/api/memory/facts/{id}` | 编辑事实 |
+| DELETE | `/api/memory/facts/{id}` | 删除事实 |
 | GET | `/api/memory/preferences` | 获取用户偏好 |
+| PUT | `/api/memory/preferences` | 设置偏好 |
+| DELETE | `/api/memory/preferences/{key}` | 删除偏好 |
+| GET | `/api/memory/stats` | 获取记忆统计 |
+| POST | `/api/memory/extract/{sessionId}` | 手动触发事实提取 |
 | POST | `/api/memory/consolidate` | 整合记忆 |
 
 ### RAG 接口
