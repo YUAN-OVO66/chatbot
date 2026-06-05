@@ -55,11 +55,25 @@ export interface Session {
 export interface MemoryFact {
   id: number
   userId: string
-  conversationId: string
   factText: string
   category: string
   importance: number
   createdAt: string
+  updatedAt: string
+}
+
+export interface FactCreateRequest {
+  userId: string
+  factText: string
+  category?: string
+  importance?: number
+}
+
+export interface FactUpdateRequest {
+  userId: string
+  factText?: string
+  category?: string
+  importance?: number
 }
 
 export interface Preference {
@@ -69,12 +83,19 @@ export interface Preference {
   preferenceValue: string
   confidence: number
   source: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface SetPreferenceRequest {
   userId: string
   preferenceKey: string
   preferenceValue: string
+}
+
+export interface MemoryStats {
+  totalFacts: number
+  totalPreferences: number
 }
 
 // === RAG ===
