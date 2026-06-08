@@ -94,22 +94,22 @@ public class WebSearchPlugin implements ChatPlugin {
             return answer;
         }
 
-        // 非显式搜索：仅当 LLM 回复不足时，搜索并追加结果
+        // 仅处理用户未显式要求搜索的情况
         if (hasExplicitSearchIntent(query)) {
             return answer;
         }
 
-        if (answer != null && !answer.isBlank()
-                && !answer.contains("抱歉") && !answer.contains("我不知道")) {
+        // 仅当 LLM 完全无回复时才兜底搜索，不做关键词猜测
+        if (answer != null && !answer.isBlank()) {
             return answer;
         }
 
-        log.info("[WebSearchPlugin] afterRag 兜底搜索 | query={}", query);
+        log.info("[WebSearchPlugin] afterRag 兜底搜索（LLM 无回复） | query={}", query);
 
         try {
             String searchResult = doSearch(query);
             if (searchResult != null && !searchResult.isBlank()) {
-                return (answer != null ? answer : "") + "\n\n**网络搜索结果：**\n" + searchResult;
+                return "**网络搜索结果：**\n" + searchResult;
             }
         } catch (Exception e) {
             log.error("[WebSearchPlugin] afterRag 搜索失败: {}", e.getMessage(), e);
