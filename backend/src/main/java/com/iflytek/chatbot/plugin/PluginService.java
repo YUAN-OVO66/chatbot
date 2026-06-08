@@ -116,8 +116,11 @@ public class PluginService {
 
     public boolean isPluginEnabled(String pluginName) {
         Boolean override = runtimeOverrides.get(pluginName);
-        if (override != null) return override;
-        return config.isPluginEnabled(pluginName);
+        boolean configEnabled = config.isPluginEnabled(pluginName);
+        boolean result = override != null ? override : configEnabled;
+        log.info("[PluginService] isPluginEnabled | plugin={}, override={}, config={}, result={}",
+                pluginName, override, configEnabled, result);
+        return result;
     }
 
     public void setPluginEnabled(String pluginName, boolean enabled) {

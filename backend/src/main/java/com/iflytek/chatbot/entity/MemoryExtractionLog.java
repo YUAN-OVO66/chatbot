@@ -24,7 +24,7 @@ public class MemoryExtractionLog {
     private String extractionType;
 
     @Column(name = "input_message_count")
-    private Integer inputMessageCount;
+    private Integer inputMessageCount; 
 
     @Column(name = "extracted_count")
     private Integer extractedCount;

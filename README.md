@@ -37,10 +37,10 @@
 内置插件：
 - **TimePlugin** - 时间查询
 - **CalculatorPlugin** - 数学计算
-- **WebSearchPlugin** - 网络搜索（支持显式搜索意图识别，接入百度 AI 搜索）
+- **WebSearchPlugin** - 网络搜索（接入百度 AI 搜索，显式搜索在 beforeRag 阶段注入结果到 query，非显式搜索在 afterRag 阶段兜底补充）
 
 插件支持两个执行阶段：
-- `beforeRag` - 预处理，可短路跳过 LLM
+- `beforeRag` - 预处理，可修改 query 或短路跳过 LLM
 - `afterRag` - 后处理，增强回复内容
 
 ### Skill 系统

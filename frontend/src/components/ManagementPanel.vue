@@ -155,13 +155,21 @@ async function handleDeleteDoc(doc: RagDocument) {
 
 // Plugin functions
 async function togglePlugin(plugin: Plugin) {
-  if (plugin.enabled) {
-    await disablePlugin(plugin.name)
-  } else {
-    await enablePlugin(plugin.name)
+  try {
+    if (plugin.enabled) {
+      await disablePlugin(plugin.name)
+    } else {
+      await enablePlugin(plugin.name)
+    }
+    plugin.enabled = !plugin.enabled
+    ElMessage.success(`${plugin.name} 已${plugin.enabled ? '启用' : '禁用'}`)
+  } catch {
+    // API 失败时不翻转状态，重新加载后端真实状态
+    try {
+      const res = await getPlugins()
+      plugins.value = res.data
+    } catch { /* ignore */ }
   }
-  plugin.enabled = !plugin.enabled
-  ElMessage.success(`${plugin.name} 已${plugin.enabled ? '启用' : '禁用'}`)
 }
 
 // Memory - Fact functions

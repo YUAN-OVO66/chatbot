@@ -64,6 +64,27 @@ public class WebSearchPlugin implements ChatPlugin {
 
     @Override
     public PluginResult beforeRag(String query, String userId) {
+        if (!config.isPluginEnabled("web-search")) {
+            log.info("[WebSearchPlugin] 插件已禁用，跳过");
+            return PluginResult.continueNext();
+        }
+
+        // 显式搜索意图：先搜索，将结果注入 query，让 LLM 基于搜索内容生成回答
+        if (hasExplicitSearchIntent(query)) {
+            log.info("[WebSearchPlugin] beforeRag 调用百度 AI 搜索 | query={}", query);
+            try {
+                String searchResult = doSearch(query);
+                if (searchResult != null && !searchResult.isBlank()) {
+                    String augmentedQuery = query
+                            + "\n\n以下是从互联网搜索到的相关信息，请基于这些内容为用户生成回答：\n"
+                            + searchResult;
+                    return PluginResult.modifiedQuery(augmentedQuery);
+                }
+            } catch (Exception e) {
+                log.error("[WebSearchPlugin] beforeRag 搜索失败: {}", e.getMessage(), e);
+            }
+        }
+
         return PluginResult.continueNext();
     }
 
@@ -73,31 +94,25 @@ public class WebSearchPlugin implements ChatPlugin {
             return answer;
         }
 
-        boolean explicitSearch = hasExplicitSearchIntent(query);
-
-        // 如果用户明确要求搜索，无论 LLM 回复如何都执行搜索
-        if (!explicitSearch) {
-            // 否则，仅当 LLM 回复不足时才搜索
-            if (answer != null && !answer.isBlank()
-                    && !answer.contains("抱歉") && !answer.contains("我不知道")) {
-                return answer;
-            }
+        // 非显式搜索：仅当 LLM 回复不足时，搜索并追加结果
+        if (hasExplicitSearchIntent(query)) {
+            return answer;
         }
 
-        log.info("[WebSearchPlugin] 调用百度 AI 搜索 | explicit={}, query={}", explicitSearch, query);
+        if (answer != null && !answer.isBlank()
+                && !answer.contains("抱歉") && !answer.contains("我不知道")) {
+            return answer;
+        }
+
+        log.info("[WebSearchPlugin] afterRag 兜底搜索 | query={}", query);
 
         try {
             String searchResult = doSearch(query);
             if (searchResult != null && !searchResult.isBlank()) {
-                // 显式搜索意图：用搜索结果替换 LLM 的回复（LLM 可能用了 shell 爬取，质量差）
-                // 非显式：追加到 LLM 回复后面
-                if (explicitSearch) {
-                    return "**网络搜索结果：**\n" + searchResult;
-                }
                 return (answer != null ? answer : "") + "\n\n**网络搜索结果：**\n" + searchResult;
             }
         } catch (Exception e) {
-            log.error("[WebSearchPlugin] 搜索失败: {}", e.getMessage(), e);
+            log.error("[WebSearchPlugin] afterRag 搜索失败: {}", e.getMessage(), e);
         }
 
         return answer;
@@ -183,12 +198,16 @@ public class WebSearchPlugin implements ChatPlugin {
             JsonNode root = objectMapper.readTree(body);
             StringBuilder sb = new StringBuilder();
 
-            // 解析 search_results 数组
+            // 解析 search_results 数组（兼容 search_results 和 references 两种字段名）
             JsonNode results = root.get("search_results");
+            if (results == null || !results.isArray()) {
+                results = root.get("references");
+            }
             if (results != null && results.isArray()) {
                 for (JsonNode result : results) {
                     String title = result.has("title") ? result.get("title").asText() : "";
-                    String snippet = result.has("snippet") ? result.get("snippet").asText() : "";
+                    String snippet = result.has("snippet") ? result.get("snippet").asText()
+                            : result.has("content") ? result.get("content").asText() : "";
                     String url = result.has("url") ? result.get("url").asText() : "";
 
                     if (!snippet.isBlank()) {

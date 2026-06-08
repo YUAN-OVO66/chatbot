@@ -90,7 +90,7 @@ chatbot:
       time: { enabled: false }
       calculator: { enabled: false }
       web-search:
-        enabled: false
+        enabled: true
         config:
           api-key: ${QIANFAN_API_KEY}
           top-k: 5
