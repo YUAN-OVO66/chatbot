@@ -243,6 +243,7 @@ pnpm build
 | GET | `/api/memory/stats` | 获取记忆统计 |
 | POST | `/api/memory/extract/{sessionId}` | 手动触发事实提取 |
 | POST | `/api/memory/consolidate` | 整合记忆 |
+| DELETE | `/api/memory/reset` | 重置所有记忆（事实 + 偏好 + 向量） |
 
 ### RAG 接口
 

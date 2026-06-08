@@ -159,6 +159,14 @@ public class MemoryController {
         return Result.success();
     }
 
+    @DeleteMapping("/reset")
+    @Operation(summary = "重置所有记忆", description = "清空指定用户的所有记忆事实、偏好和向量数据，此操作不可恢复")
+    public Result<Void> resetAllMemory(
+            @Parameter(description = "用户ID") @RequestParam String userId) {
+        longTermMemoryService.resetAllMemory(userId);
+        return Result.success();
+    }
+
     @PostMapping("/extract/{sessionId}")
     @Operation(summary = "手动触发提取", description = "手动触发指定会话的事实提取，从对话历史中提取用户事实和偏好")
     public Result<String> extractFacts(

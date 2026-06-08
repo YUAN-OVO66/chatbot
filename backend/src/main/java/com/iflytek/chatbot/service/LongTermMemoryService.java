@@ -261,13 +261,6 @@ public class LongTermMemoryService {
             extractionLog.setStatus("success");
             log.info("[Extract] ========== 事实提取完成 | 共提取 {} 条 ==========", extractedCount);
 
-            // 提取后自动整合，清理可能产生的重复
-            try {
-                consolidateMemories(userId);
-            } catch (Exception e) {
-                log.warn("[Extract] 提取后自动整合失败 | error={}", e.getMessage());
-            }
-
         } catch (Exception e) {
             extractionLog.setStatus("failed");
             extractionLog.setErrorMessage(e.getMessage());
@@ -283,88 +276,153 @@ public class LongTermMemoryService {
         List<UserMemoryFact> facts = factRepository
                 .findByUserIdAndIsActiveOrderByImportanceDescCreatedAtDesc(userId, true);
 
-        // 标记已删除的 fact id，避免处理过程中重复比较
+        if (facts.isEmpty()) {
+            log.info("[Memory] 无活跃事实，跳过整合");
+            return;
+        }
+
         java.util.Set<Long> removedIds = new java.util.HashSet<>();
         int removed = 0;
 
-        for (int i = 0; i < facts.size(); i++) {
-            if (removedIds.contains(facts.get(i).getId())) continue;
-
-            for (int j = i + 1; j < facts.size(); j++) {
-                if (removedIds.contains(facts.get(j).getId())) continue;
-
-                UserMemoryFact fi = facts.get(i);
-                UserMemoryFact fj = facts.get(j);
-
-                // 精确匹配 或 语义相似度 >= 0.75 视为重复
-                boolean isDuplicate = fi.getFactText().equalsIgnoreCase(fj.getFactText());
-                if (!isDuplicate) {
-                    double sim = calculateTextSimilarity(fi.getFactText(), fj.getFactText());
-                    if (sim >= 0.75) {
-                        isDuplicate = true;
-                        log.info("[Memory] 语义重复 | \"{}\" vs \"{}\" (sim={})", fi.getFactText(), fj.getFactText(), sim);
-                    }
+        // 第一轮：删除重要程度 < 5 的事实
+        for (UserMemoryFact fact : facts) {
+            if (fact.getImportance() < 5) {
+                log.info("[Memory] 低重要性删除 | id={}, imp={}, text={}", fact.getId(), fact.getImportance(), fact.getFactText());
+                fact.setIsActive(false);
+                factRepository.save(fact);
+                try {
+                    semanticMemoryService.deleteFactDocument(fact.getId());
+                } catch (Exception e) {
+                    log.warn("[Memory] 删除向量失败 | factId={}", fact.getId());
                 }
-
-                if (isDuplicate) {
-                    fj.setIsActive(false);
-                    factRepository.save(fj);
-                    try {
-                        semanticMemoryService.deleteFactDocument(fj.getId());
-                    } catch (Exception e) {
-                        log.warn("[Memory] 整合时删除向量失败 | factId={}", fj.getId());
-                    }
-                    removedIds.add(fj.getId());
-                    removed++;
-                }
+                removedIds.add(fact.getId());
+                removed++;
             }
         }
-        log.info("[Memory] 记忆整合完成 | userId={}, 去除 {} 条重复事实", userId, removed);
+
+        // 第二轮：语义去重（仅处理剩余的高重要性事实）
+        List<UserMemoryFact> remaining = facts.stream()
+                .filter(f -> !removedIds.contains(f.getId())).toList();
+
+        for (UserMemoryFact fact : remaining) {
+            if (removedIds.contains(fact.getId())) continue;
+
+            try {
+                List<org.springframework.ai.document.Document> similarDocs =
+                        semanticMemoryService.searchRelevantFacts(userId, fact.getFactText(), 10);
+
+                for (org.springframework.ai.document.Document doc : similarDocs) {
+                    Object factIdObj = doc.getMetadata().get("factId");
+                    if (factIdObj == null) continue;
+
+                    Long similarFactId = Long.parseLong(factIdObj.toString());
+                    if (similarFactId.equals(fact.getId()) || removedIds.contains(similarFactId)) continue;
+
+                    Double score = null;
+                    Object scoreObj = doc.getMetadata().get("score");
+                    if (scoreObj instanceof Number) {
+                        score = ((Number) scoreObj).doubleValue();
+                    }
+                    String source;
+                    double similarity;
+                    if (score != null) {
+                        similarity = score;
+                        source = "vector";
+                    } else {
+                        similarity = calculateTextSimilarity(fact.getFactText(), doc.getText());
+                        source = "text";
+                    }
+
+                    log.info("[Memory] 整合去重检查 | exist=\"{}\", similarity={}, source={}",
+                            doc.getText().length() > 30 ? doc.getText().substring(0, 30) + "..." : doc.getText(),
+                            String.format("%.4f", similarity), source);
+
+                    if (similarity >= 0.70) {
+                        Optional<UserMemoryFact> similarOpt = factRepository.findById(similarFactId);
+                        if (similarOpt.isPresent() && similarOpt.get().getIsActive()) {
+                            UserMemoryFact similar = similarOpt.get();
+
+                            UserMemoryFact toRemove;
+                            if (fact.getImportance() >= similar.getImportance()) {
+                                toRemove = similar;
+                            } else {
+                                toRemove = fact;
+                            }
+
+                            log.info("[Memory] 语义重复, 删除 | remove=\"{}\"(imp={}), keep=\"{}\"(imp={}), sim={}",
+                                    toRemove.getFactText(), toRemove.getImportance(),
+                                    toRemove.getId().equals(fact.getId()) ? similar.getFactText() : fact.getFactText(),
+                                    toRemove.getId().equals(fact.getId()) ? similar.getImportance() : fact.getImportance(),
+                                    String.format("%.4f", similarity));
+
+                            toRemove.setIsActive(false);
+                            factRepository.save(toRemove);
+                            try {
+                                semanticMemoryService.deleteFactDocument(toRemove.getId());
+                            } catch (Exception e) {
+                                log.warn("[Memory] 整合时删除向量失败 | factId={}", toRemove.getId());
+                            }
+                            removedIds.add(toRemove.getId());
+                            removed++;
+
+                            if (toRemove.getId().equals(fact.getId())) break;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[Memory] 整合检查失败 | factId={}, error={}", fact.getId(), e.getMessage());
+            }
+        }
+        log.info("[Memory] 记忆整合完成 | userId={}, 去除 {} 条", userId, removed);
     }
 
     /**
      * 计算两段文本的相似度（0.0 ~ 1.0）
-     * 综合关键词重叠率和编辑距离
+     * 综合字符 bigram Jaccard、编辑距离和共同字符比
      */
     private double calculateTextSimilarity(String text1, String text2) {
         if (text1.equals(text2)) return 1.0;
 
-        // 提取中文关键词（2-4字）和英文单词
-        java.util.Set<String> words1 = extractKeywords(text1);
-        java.util.Set<String> words2 = extractKeywords(text2);
+        // 1. 字符 bigram Jaccard（对中文语义更敏感）
+        java.util.Set<String> bigrams1 = extractCharBigrams(text1);
+        java.util.Set<String> bigrams2 = extractCharBigrams(text2);
 
-        if (words1.isEmpty() && words2.isEmpty()) {
-            return text1.equalsIgnoreCase(text2) ? 1.0 : 0.0;
-        }
+        java.util.Set<String> intersection = new java.util.HashSet<>(bigrams1);
+        intersection.retainAll(bigrams2);
+        java.util.Set<String> union = new java.util.HashSet<>(bigrams1);
+        union.addAll(bigrams2);
+        double bigramJaccard = union.isEmpty() ? 0.0 : (double) intersection.size() / union.size();
 
-        // Jaccard 相似度
-        java.util.Set<String> intersection = new java.util.HashSet<>(words1);
-        intersection.retainAll(words2);
-        java.util.Set<String> union = new java.util.HashSet<>(words1);
-        union.addAll(words2);
-        double jaccard = union.isEmpty() ? 0.0 : (double) intersection.size() / union.size();
+        // 2. 共同字符比（忽略顺序，捕捉主题重叠）
+        java.util.Set<Character> chars1 = new java.util.HashSet<>();
+        for (char c : text1.toCharArray()) chars1.add(c);
+        java.util.Set<Character> chars2 = new java.util.HashSet<>();
+        for (char c : text2.toCharArray()) chars2.add(c);
+        java.util.Set<Character> charInter = new java.util.HashSet<>(chars1);
+        charInter.retainAll(chars2);
+        java.util.Set<Character> charUnion = new java.util.HashSet<>(chars1);
+        charUnion.addAll(chars2);
+        double charJaccard = charUnion.isEmpty() ? 0.0 : (double) charInter.size() / charUnion.size();
 
-        // 归一化编辑距离
+        // 3. 归一化编辑距离
         int maxLen = Math.max(text1.length(), text2.length());
         double editSimilarity = maxLen == 0 ? 1.0 : 1.0 - ((double) editDistance(text1, text2) / maxLen);
 
-        // 加权: 关键词重叠占 70%, 编辑距离占 30%
-        return jaccard * 0.7 + editSimilarity * 0.3;
+        // 加权: bigram 50%, 字符重叠 25%, 编辑距离 25%
+        return bigramJaccard * 0.5 + charJaccard * 0.25 + editSimilarity * 0.25;
     }
 
-    private java.util.Set<String> extractKeywords(String text) {
-        java.util.Set<String> words = new java.util.HashSet<>();
-        // 中文 2-4 字词
-        java.util.regex.Matcher cnMatcher = java.util.regex.Pattern.compile("[\\u4e00-\\u9fff]{2,4}").matcher(text);
-        while (cnMatcher.find()) {
-            words.add(cnMatcher.group());
+    private java.util.Set<String> extractCharBigrams(String text) {
+        java.util.Set<String> bigrams = new java.util.HashSet<>();
+        // 去除空白和标点，提取有意义的字符
+        String cleaned = text.replaceAll("[\\s\\p{Punct}，。、；：！？（）【】《》\"']", "");
+        for (int i = 0; i < cleaned.length() - 1; i++) {
+            bigrams.add(cleaned.substring(i, i + 2));
         }
-        // 英文单词
-        java.util.regex.Matcher enMatcher = java.util.regex.Pattern.compile("[a-zA-Z]+").matcher(text.toLowerCase());
-        while (enMatcher.find()) {
-            words.add(enMatcher.group());
+        if (cleaned.length() == 1) {
+            bigrams.add(cleaned);
         }
-        return words;
+        return bigrams;
     }
 
     private int editDistance(String s1, String s2) {
@@ -489,5 +547,32 @@ public class LongTermMemoryService {
 
         log.info("[Memory] 事实更新完成 | factId={}", factId);
         return fact;
+    }
+
+    /**
+     * 重置用户所有记忆：事实、偏好、向量
+     */
+    @Transactional
+    public void resetAllMemory(String userId) {
+        log.info("[Memory] ========== 重置所有记忆开始 | userId={} ==========", userId);
+
+        // 1. 删除所有事实（MySQL + Milvus）
+        List<UserMemoryFact> facts = factRepository.findByUserId(userId);
+        for (UserMemoryFact fact : facts) {
+            try {
+                semanticMemoryService.deleteFactDocument(fact.getId());
+            } catch (Exception e) {
+                log.warn("[Memory] 删除向量失败 | factId={}", fact.getId());
+            }
+        }
+        factRepository.deleteAll(facts);
+        log.info("[Memory] 已删除 {} 条事实", facts.size());
+
+        // 2. 删除所有偏好
+        List<UserPreference> prefs = preferenceRepository.findByUserIdOrderByConfidenceDesc(userId);
+        preferenceRepository.deleteAll(prefs);
+        log.info("[Memory] 已删除 {} 条偏好", prefs.size());
+
+        log.info("[Memory] ========== 重置所有记忆完成 | userId={} ==========", userId);
     }
 }

@@ -60,3 +60,8 @@ export function extractMemory(sessionId: string, userId: string): Promise<ApiRes
 export function consolidateMemory(userId: string): Promise<ApiResponse<unknown>> {
   return post<unknown>(`/memory/consolidate?userId=${encodeURIComponent(userId)}`)
 }
+
+// 重置所有记忆（事实 + 偏好 + 向量）
+export function resetMemory(userId: string): Promise<ApiResponse<unknown>> {
+  return del<unknown>(`/memory/reset?userId=${encodeURIComponent(userId)}`)
+}

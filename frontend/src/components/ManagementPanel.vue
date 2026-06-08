@@ -16,6 +16,7 @@ import {
   getMemoryStats,
   consolidateMemory,
   extractMemory,
+  resetMemory,
 } from '@/api/memory'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type {
@@ -44,6 +45,7 @@ const stats = ref<MemoryStats>({ totalFacts: 0, totalPreferences: 0 })
 const factCategory = ref<string>('')
 const consolidating = ref(false)
 const extracting = ref(false)
+const resetting = ref(false)
 
 // Fact dialog state
 const factDialogVisible = ref(false)
@@ -285,6 +287,28 @@ async function handleExtract() {
   }
 }
 
+async function handleReset() {
+  try {
+    await ElMessageBox.confirm(
+      '此操作将清空所有记忆事实、偏好和向量数据，且不可恢复。是否继续？',
+      '重置所有记忆',
+      { confirmButtonText: '确认重置', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return // 用户取消
+  }
+  resetting.value = true
+  try {
+    await resetMemory(userStore.userId!)
+    ElMessage.success('所有记忆已重置')
+    await loadMemoryData()
+  } catch {
+    // handled by interceptor
+  } finally {
+    resetting.value = false
+  }
+}
+
 async function copyUserId() {
   if (userStore.userId) {
     await navigator.clipboard.writeText(userStore.userId)
@@ -369,6 +393,7 @@ async function copyUserId() {
           <div class="stats-actions">
             <el-button size="small" :loading="extracting" @click="handleExtract">手动提取</el-button>
             <el-button size="small" :loading="consolidating" @click="handleConsolidate">整合记忆</el-button>
+            <el-button size="small" type="danger" :loading="resetting" @click="handleReset">重置记忆</el-button>
           </div>
         </div>
 
