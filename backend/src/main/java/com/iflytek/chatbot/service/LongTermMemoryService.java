@@ -64,12 +64,32 @@ public class LongTermMemoryService {
         log.debug("[Memory] retrieveRelevantFacts | userId={}, topK={}", userId, topK);
 
         List<Document> docs = semanticMemoryService.searchRelevantFacts(userId, query, topK);
+        if (docs.isEmpty()) {
+            log.info("[Memory] retrieveRelevantFacts | userId={}, returned=0", userId);
+            return List.of();
+        }
 
-        List<UserMemoryFact> results = docs.stream()
-                .map(doc -> {
-                    Object id = doc.getMetadata().get("factId");
-                    return id != null ? factRepository.findById(Long.parseLong(id.toString())).orElse(null) : null;
-                })
+        // 收集 factId 保持向量检索的顺序，一次性 findAllById 替代 N 次 SELECT
+        List<Long> orderedIds = new java.util.ArrayList<>(docs.size());
+        for (Document doc : docs) {
+            Object id = doc.getMetadata().get("factId");
+            if (id != null) {
+                try {
+                    orderedIds.add(Long.parseLong(id.toString()));
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        if (orderedIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, UserMemoryFact> byId = new java.util.HashMap<>();
+        for (UserMemoryFact f : factRepository.findAllById(orderedIds)) {
+            byId.put(f.getId(), f);
+        }
+
+        List<UserMemoryFact> results = orderedIds.stream()
+                .map(byId::get)
                 .filter(f -> f != null && f.getIsActive())
                 .toList();
 

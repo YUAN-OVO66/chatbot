@@ -49,25 +49,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟡 [important] 中等优先级问题（建议在近期迭代修复）
 
-### 2. N+1 查询：`retrieveRelevantFacts` 每条 doc 单独 `findById`
-
-**位置**：`LongTermMemoryService.java:68-74`
-
-```java
-.map(doc -> {
-    Object id = doc.getMetadata().get("factId");
-    return id != null ? factRepository.findById(Long.parseLong(id.toString())).orElse(null) : null;
-})
-```
-
-topK=5 时 5 次 SELECT；`consolidateMemories` 的内层循环（`removeSemanticallyDuplicateFacts`）更糟糕：N 个事实 × 每次 topK=10 → 最多 10N 次 `findById`。
-
-**建议**：
-- 改用 `factRepository.findAllById(idList)`，然后映射回顺序。
-- `consolidateMemories` 整体改为：一次性把活跃 facts 全量取出 → 在内存里两两比较（已有 `calculateTextSimilarity`），按 importance 排序后做并查集去重；只在需要新计算 embedding 时调一次 Milvus。
-
----
-
 ### 3. `editDistance` 无长度上限 — 长事实文本会引发 CPU/内存尖刺
 
 **位置**：`LongTermMemoryService.java:469-484`
