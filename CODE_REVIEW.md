@@ -51,10 +51,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟢 [nit] 低优先级 / 风格
 
-### 13. `SkillConfig.executeShell` 的 Windows 命令改写依赖 regex 替换
-
-`replaceFirst("^(bash(\\s+-c)?\\s+|cmd(\\s+/c)?\\s+)", "")` 等改写逻辑碎片化，难以测试。建议在抽象层处理 OS 差异，规则集中、并写单测覆盖。
-
 ### 14. `MemoryController.deleteFact` 静默吞掉异常
 
 ```java

@@ -94,18 +94,8 @@ public class SkillConfig {
     private String executeShell(String command, java.util.Set<String> allowedEnv) {
         log.info("[Shell] 原始命令: {}", command);
 
-        // Windows 兼容处理
         if (IS_WINDOWS) {
-            // python3 → python
-            command = command.replace("python3 ", "python ");
-            // 去掉 bash / bash -c / cmd /c 等包装前缀
-            command = command.replaceFirst("^(bash(\\s+-c)?\\s+|cmd(\\s+/c)?\\s+)", "");
-            // .sh → .py（旧脚本残留兼容）
-            command = command.replace(".sh ", ".py ");
-            // 如果去掉 bash 后以 .py 文件开头，自动加 python 前缀
-            if (command.matches("^/.*\\.py\\s.*") || command.matches("^[A-Z]:/.*\\.py\\s.*")) {
-                command = "python " + command;
-            }
+            command = WindowsCommandNormalizer.normalize(command);
         }
 
         log.info("[Shell] 执行命令: {}", command);
