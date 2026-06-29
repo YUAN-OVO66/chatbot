@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * 语义记忆服务：管理 Milvus 向量库中的对话和事实文档
@@ -19,10 +20,27 @@ public class SemanticMemoryService {
 
     private static final Logger log = LoggerFactory.getLogger(SemanticMemoryService.class);
 
+    // userId / conversationId: UUID 格式 或 字母数字下划线横线（最长128字符）
+    private static final Pattern SAFE_ID = Pattern.compile("^[\\w\\-]{1,128}$");
+    // factId: 纯数字
+    private static final Pattern SAFE_FACT_ID = Pattern.compile("^\\d{1,19}$");
+
     private final VectorStore vectorStore;
 
     public SemanticMemoryService(VectorStore vectorStore) {
         this.vectorStore = vectorStore;
+    }
+
+    private static void requireSafeId(String value, String fieldName) {
+        if (value == null || !SAFE_ID.matcher(value).matches()) {
+            throw new IllegalArgumentException("非法的 " + fieldName + " 格式: " + value);
+        }
+    }
+
+    private static void requireSafeFactId(String value) {
+        if (value == null || !SAFE_FACT_ID.matcher(value).matches()) {
+            throw new IllegalArgumentException("非法的 factId 格式: " + value);
+        }
     }
 
     /**
@@ -30,8 +48,10 @@ public class SemanticMemoryService {
      */
     public void storeConversationChunk(String userId, String conversationId,
                                         String userMessage, String assistantReply) {
+        requireSafeId(userId, "userId");
+        requireSafeId(conversationId, "conversationId");
         String content = "[User]: " + userMessage + "\n[Assistant]: " + assistantReply;
-        log.info("[Milvus] 存储对话片段 | userId={}, conversationId={}, 内容长度={}",
+        log.debug("[Milvus] storeConversation | userId={}, conversationId={}, len={}",
                 userId, conversationId, content.length());
 
         Document doc = new Document(content, Map.of(
@@ -41,22 +61,21 @@ public class SemanticMemoryService {
                 "timestamp", LocalDateTime.now().toString()
         ));
         vectorStore.add(List.of(doc));
-
-        log.info("[Milvus] 对话片段存储完成 | userId={}, conversationId={}", userId, conversationId);
     }
 
     /**
      * 语义检索相似历史对话
      */
     public List<Document> searchRelevantConversations(String userId, String query, int topK) {
-        log.info("[Milvus] 检索相似对话 | userId={}, topK={}", userId, topK);
+        requireSafeId(userId, "userId");
+        log.debug("[Milvus] searchConversations | userId={}, topK={}", userId, topK);
         SearchRequest request = SearchRequest.builder()
                 .query(query)
                 .topK(topK)
                 .filterExpression("userId == '" + userId + "' && type == 'conversation'")
                 .build();
         List<Document> results = vectorStore.similaritySearch(request);
-        log.info("[Milvus] 检索到 {} 条相似对话 | userId={}", results.size(), userId);
+        log.debug("[Milvus] searchConversations 返回 {} 条 | userId={}", results.size(), userId);
         return results;
     }
 
@@ -65,9 +84,8 @@ public class SemanticMemoryService {
      */
     public void storeFactDocument(String userId, String factText, String category,
                                    byte importance, Long factId) {
-        log.info("[Milvus] 存储事实文档 | userId={}, factId={}, category={}, text={}",
-                userId, factId, category,
-                factText.length() > 50 ? factText.substring(0, 50) + "..." : factText);
+        requireSafeId(userId, "userId");
+        log.debug("[Milvus] storeFact | userId={}, factId={}, category={}", userId, factId, category);
 
         Document doc = new Document(factText, Map.of(
                 "userId", userId,
@@ -77,16 +95,14 @@ public class SemanticMemoryService {
                 "factId", String.valueOf(factId)
         ));
         vectorStore.add(List.of(doc));
-
-        log.info("[Milvus] 事实文档存储完成 | userId={}, factId={}", userId, factId);
     }
 
     /**
      * 语义检索相关事实
      */
     public List<Document> searchRelevantFacts(String userId, String query, int topK) {
-        log.info("[Milvus] 检索相关事实 | userId={}, topK={}, query={}",
-                userId, topK, query.length() > 40 ? query.substring(0, 40) + "..." : query);
+        requireSafeId(userId, "userId");
+        log.debug("[Milvus] searchFacts | userId={}, topK={}", userId, topK);
 
         SearchRequest request = SearchRequest.builder()
                 .query(query)
@@ -94,11 +110,7 @@ public class SemanticMemoryService {
                 .filterExpression("userId == '" + userId + "' && type == 'fact'")
                 .build();
         List<Document> results = vectorStore.similaritySearch(request);
-
-        log.info("[Milvus] 检索到 {} 条相关事实 | userId={}", results.size(), userId);
-        for (Document doc : results) {
-            log.debug("[Milvus]   - 内容={}, metadata={}", doc.getText(), doc.getMetadata());
-        }
+        log.debug("[Milvus] searchFacts 返回 {} 条 | userId={}", results.size(), userId);
         return results;
     }
 
@@ -106,17 +118,14 @@ public class SemanticMemoryService {
      * 删除指定会话的所有向量文档
      */
     public void deleteConversationDocuments(String conversationId) {
-        log.info("[Milvus] 删除会话向量文档 | conversationId={}", conversationId);
+        requireSafeId(conversationId, "conversationId");
+        log.debug("[Milvus] deleteConversation | conversationId={}", conversationId);
         vectorStore.delete("conversationId == '" + conversationId + "'");
-        log.info("[Milvus] 会话向量文档删除完成 | conversationId={}", conversationId);
     }
 
-    /**
-     * 删除指定事实的向量文档
-     */
     public void deleteFactDocument(Long factId) {
-        log.info("[Milvus] 删除事实向量文档 | factId={}", factId);
+        requireSafeFactId(String.valueOf(factId));
+        log.debug("[Milvus] deleteFact | factId={}", factId);
         vectorStore.delete("factId == '" + factId + "'");
-        log.info("[Milvus] 事实向量文档删除完成 | factId={}", factId);
     }
 }

@@ -1,5 +1,6 @@
 package com.iflytek.chatbot.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iflytek.chatbot.dto.ChatMessage;
 import com.iflytek.chatbot.dto.ChatRequest;
 import com.iflytek.chatbot.dto.ChatResponse;
@@ -13,15 +14,15 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.ai.chat.memory.ChatMemoryRepository;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class ChatService {
@@ -30,23 +31,29 @@ public class ChatService {
 
     private final ChatClient chatClient;
     private final ChatMemory chatMemory;
+    private final ChatMemoryRepository chatMemoryRepository;
     private final SessionService sessionService;
-    private final LongTermMemoryService longTermMemoryService;
-    private final SemanticMemoryService semanticMemoryService;
     private final PluginService pluginService;
+    private final ObjectMapper objectMapper;
+    private final AsyncPostProcessor asyncPostProcessor;
+    private final ThreadPoolTaskExecutor chatTaskExecutor;
 
     public ChatService(ChatClient chatClient,
                        ChatMemory chatMemory,
+                       ChatMemoryRepository chatMemoryRepository,
                        SessionService sessionService,
-                       LongTermMemoryService longTermMemoryService,
-                       SemanticMemoryService semanticMemoryService,
-                       PluginService pluginService) {
+                       PluginService pluginService,
+                       ObjectMapper objectMapper,
+                       AsyncPostProcessor asyncPostProcessor,
+                       @Qualifier("chatTaskExecutor") ThreadPoolTaskExecutor chatTaskExecutor) {
         this.chatClient = chatClient;
         this.chatMemory = chatMemory;
+        this.chatMemoryRepository = chatMemoryRepository;
         this.sessionService = sessionService;
-        this.longTermMemoryService = longTermMemoryService;
-        this.semanticMemoryService = semanticMemoryService;
         this.pluginService = pluginService;
+        this.objectMapper = objectMapper;
+        this.asyncPostProcessor = asyncPostProcessor;
+        this.chatTaskExecutor = chatTaskExecutor;
     }
 
     public ChatResponse chat(ChatRequest request) {
@@ -79,34 +86,43 @@ public class ChatService {
                             .param("chat_memory_user_id", request.userId()))
                     .call()
                     .content();
+            reply = Objects.toString(reply, "");
 
             long elapsed = System.currentTimeMillis() - start;
-            String replyPreview = reply.length() > 100 ? reply.substring(0, 100) + "..." : reply;
+            String replyPreview = reply == null ? "(null)"
+                    : reply.length() > 100 ? reply.substring(0, 100) + "..." : reply;
             log.info("[ChatService] <<< ChatClient 返回 | 耗时={}ms, reply={}", elapsed, replyPreview);
+
+            // 如果插件修改了查询，将记忆中的用户消息还原为原始消息
+            if (!actualQuery.equals(request.message())) {
+                fixMemoryUserMessage(sessionId, request.message());
+            }
         }
 
         // 4. 插件 afterRag 阶段
         PluginContext pluginCtx = new PluginContext(
                 request.message(), actualQuery, shortCircuited,
                 shortCircuited ? beforeResult.shortCircuitPlugin() : null);
-        reply = pluginService.executeAfterRag(reply, request.message(), request.userId(), pluginCtx);
+        reply = Objects.toString(
+                pluginService.executeAfterRag(reply, request.message(), request.userId(), pluginCtx),
+                Objects.toString(reply, ""));
 
         // 5. 异步后处理
         log.info("[ChatService] 提交异步后处理 | sessionId={}", sessionId);
-        asyncExtractAndStore(sessionId, request.userId(), request.message(), reply);
+        asyncPostProcessor.extractAndStore(sessionId, request.userId(), request.message(), reply);
 
         return new ChatResponse(sessionId, reply);
     }
-
-    /** 记录每个 session 上次提取时的消息数，用于节流 */
-    private final ConcurrentHashMap<String, Integer> lastExtractedSize = new ConcurrentHashMap<>();
 
     private static final int MAX_STREAM_RETRIES = 3;
     private static final long[] RETRY_DELAYS_MS = {1000, 2000, 3000};
 
     public void streamChat(ChatRequest request, SseEmitter emitter) {
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-        executor.submit(() -> {
+        emitter.onCompletion(() -> {});
+        emitter.onTimeout(() -> emitter.complete());
+        emitter.onError(t -> {});
+
+        chatTaskExecutor.submit(() -> {
             try {
                 // 1. 解析或创建会话
                 String sessionId = resolveSessionId(request.userId(), request.sessionId());
@@ -124,10 +140,10 @@ public class ChatService {
 
                     emitter.send(SseEmitter.event()
                             .name("delta")
-                            .data("{\"content\": \"" + escapeJson(reply) + "\"}"));
+                            .data(toJson(Map.of("content", reply))));
                     emitter.send(SseEmitter.event()
                             .name("done")
-                            .data("{\"sessionId\": \"" + sessionId + "\", \"reply\": \"" + escapeJson(reply) + "\"}"));
+                            .data(toJson(Map.of("sessionId", sessionId, "reply", reply))));
                     emitter.complete();
                     return;
                 }
@@ -145,7 +161,6 @@ public class ChatService {
                         }
 
                         StringBuilder fullReply = new StringBuilder();
-                        boolean[] completed = {false};
                         Exception[] streamError = {null};
 
                         chatClient.prompt()
@@ -160,18 +175,16 @@ public class ChatService {
                                     try {
                                         emitter.send(SseEmitter.event()
                                                 .name("delta")
-                                                .data("{\"content\": \"" + escapeJson(chunk) + "\"}"));
+                                                .data(toJson(Map.of("content", chunk))));
                                     } catch (Exception e) {
                                         log.warn("[ChatService-Stream] 发送 chunk 失败: {}", e.getMessage());
                                     }
                                 })
-                                .doOnComplete(() -> completed[0] = true)
                                 .doOnError(error -> {
                                     streamError[0] = (error instanceof Exception ex) ? ex : new RuntimeException(error);
                                 })
-                                .blockLast();  // 同步等待流完成
+                                .blockLast();
 
-                        // 流正常完成
                         if (streamError[0] != null) throw streamError[0];
 
                         long elapsed = System.currentTimeMillis() - start;
@@ -181,17 +194,23 @@ public class ChatService {
                         String reply = fullReply.toString();
                         PluginContext pluginCtx = new PluginContext(
                                 request.message(), actualQuery, false, null);
-                        reply = pluginService.executeAfterRag(reply, request.message(), request.userId(), pluginCtx);
+                        reply = Objects.toString(
+                                pluginService.executeAfterRag(reply, request.message(), request.userId(), pluginCtx),
+                                reply);
+
+                        if (!actualQuery.equals(request.message())) {
+                            fixMemoryUserMessage(sessionId, request.message());
+                        }
 
                         // 5. 发送 done 事件
                         emitter.send(SseEmitter.event()
                                 .name("done")
-                                .data("{\"sessionId\": \"" + sessionId + "\", \"reply\": \"" + escapeJson(reply) + "\"}"));
+                                .data(toJson(Map.of("sessionId", sessionId, "reply", reply))));
                         emitter.complete();
 
                         // 6. 异步后处理
-                        asyncExtractAndStore(sessionId, request.userId(), request.message(), reply);
-                        return;  // 成功，退出重试循环
+                        asyncPostProcessor.extractAndStore(sessionId, request.userId(), request.message(), reply);
+                        return;
 
                     } catch (Exception e) {
                         boolean isConnectionError = isConnectionReset(e);
@@ -199,7 +218,7 @@ public class ChatService {
                             log.warn("[ChatService-Stream] 连接异常, 将重试 | attempt={}, error={}", attempt + 1, e.getMessage());
                             continue;
                         }
-                        throw e;  // 非连接错误 或 重试次数用尽
+                        throw e;
                     }
                 }
 
@@ -208,12 +227,20 @@ public class ChatService {
                 try {
                     emitter.send(SseEmitter.event()
                             .name("error")
-                            .data("{\"message\": \"" + escapeJson(e.getMessage()) + "\"}"));
+                            .data(toJson(Map.of("message", String.valueOf(e.getMessage())))));
                     emitter.completeWithError(e);
                 } catch (Exception ignored) {}
             }
         });
-        executor.shutdown();
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            log.error("[ChatService] JSON 序列化失败: {}", e.getMessage());
+            return "{}";
+        }
     }
 
     private boolean isConnectionReset(Throwable e) {
@@ -242,15 +269,6 @@ public class ChatService {
             cause = cause.getCause();
         }
         return false;
-    }
-
-    private static String escapeJson(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
     }
 
     public String resolveSessionId(String userId, String sessionId) {
@@ -289,35 +307,34 @@ public class ChatService {
                 .toList();
     }
 
-    @Async
-    protected void asyncExtractAndStore(String sessionId, String userId,
-                                         String userMessage, String assistantReply) {
+    /**
+     * 修复记忆中的用户消息：当插件修改了查询（如搜索插件注入搜索结果）后，
+     * MessageChatMemoryAdvisor 会将修改后的查询存入记忆。
+     * 此方法将最后一条用户消息还原为用户的原始输入，避免刷新对话时显示搜索结果。
+     */
+    private void fixMemoryUserMessage(String sessionId, String originalMessage) {
         try {
-            log.info("[Async] ---- 异步后处理开始 | sessionId={}, userId={}", sessionId, userId);
-
-            // 存储对话到 Milvus
-            log.info("[Async] 步骤1: 存储对话片段到 Milvus | sessionId={}", sessionId);
-            semanticMemoryService.storeConversationChunk(userId, sessionId, userMessage, assistantReply);
-            log.info("[Async] 步骤1: 对话片段存储完成 | sessionId={}", sessionId);
-
-            // 判断是否需要提取事实（节流：每新增 4 条消息才触发一次）
-            List<Message> messages = chatMemory.get(sessionId);
-            int currentSize = messages.size();
-            int lastSize = lastExtractedSize.getOrDefault(sessionId, 0);
-            log.info("[Async] 步骤2: 当前消息数={}, 上次提取时消息数={} | sessionId={}", currentSize, lastSize, sessionId);
-
-            if (currentSize >= 4 && currentSize - lastSize >= 4) {
-                log.info("[Async] 步骤3: 触发事实提取 | sessionId={}", sessionId);
-                longTermMemoryService.extractFacts(sessionId, userId, messages);
-                lastExtractedSize.put(sessionId, currentSize);
-                log.info("[Async] 步骤3: 事实提取完成 | sessionId={}", sessionId);
-            } else {
-                log.info("[Async] 步骤3: 跳过事实提取（节流） | sessionId={}", sessionId);
+            List<Message> messages = chatMemoryRepository.findByConversationId(sessionId);
+            if (messages.isEmpty()) {
+                return;
             }
 
-            log.info("[Async] ---- 异步后处理完成 | sessionId={}", sessionId);
+            // 找到最后一条用户消息并替换内容
+            boolean replaced = false;
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                if (messages.get(i) instanceof UserMessage) {
+                    messages.set(i, new UserMessage(originalMessage));
+                    replaced = true;
+                    break;
+                }
+            }
+
+            if (replaced) {
+                chatMemoryRepository.saveAll(sessionId, messages);
+                log.info("[ChatService] 已还原记忆中的用户消息为原始输入 | sessionId={}", sessionId);
+            }
         } catch (Exception e) {
-            log.error("[Async] 异步后处理失败 | sessionId={}, error={}", sessionId, e.getMessage(), e);
+            log.warn("[ChatService] 还原记忆用户消息失败 | sessionId={}, error={}", sessionId, e.getMessage());
         }
     }
 }

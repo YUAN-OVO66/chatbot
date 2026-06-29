@@ -31,24 +31,14 @@ public class ChatController {
     @PostMapping
     @Operation(summary = "发送消息", description = "发送一条消息并获取AI回复，支持多轮对话记忆")
     public Result<ChatResponse> chat(@RequestBody ChatRequest request) {
-        log.info("========== [Controller] 收到聊天请求 | userId={}, sessionId={}, message={}",
-                request.userId(), request.sessionId(), request.message());
-
-        ChatResponse response = chatService.chat(request);
-
-        String replyPreview = response.reply().length() > 80
-                ? response.reply().substring(0, 80) + "..." : response.reply();
-        log.info("========== [Controller] 返回响应 | sessionId={}, reply={}", response.sessionId(), replyPreview);
-
-        return Result.success(response);
+        log.debug("[Controller] chat | userId={}, sessionId={}", request.userId(), request.sessionId());
+        return Result.success(chatService.chat(request));
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "流式发送消息", description = "SSE流式返回AI回复，支持多轮对话记忆")
     public SseEmitter stream(@RequestBody ChatRequest request) {
-        log.info("========== [Controller] 收到流式聊天请求 | userId={}, sessionId={}, message={}",
-                request.userId(), request.sessionId(), request.message());
-
+        log.debug("[Controller] stream | userId={}, sessionId={}", request.userId(), request.sessionId());
         SseEmitter emitter = new SseEmitter(5 * 60 * 1000L);
         chatService.streamChat(request, emitter);
         return emitter;
@@ -57,9 +47,6 @@ public class ChatController {
     @GetMapping("/history")
     @Operation(summary = "历史消息", description = "获取指定会话的所有历史聊天记录")
     public Result<List<ChatMessage>> history(@RequestParam String sessionId) {
-        log.info("========== [Controller] 查询历史消息 | sessionId={} ==========", sessionId);
-        List<ChatMessage> messages = chatService.getHistory(sessionId);
-        log.info("========== [Controller] 返回 {} 条历史消息 ==========", messages.size());
-        return Result.success(messages);
+        return Result.success(chatService.getHistory(sessionId));
     }
 }
