@@ -55,12 +55,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 两者并存是合理的（外部 SQL 建表 + JPA 校验），但 `mode: always` 会在每次启动重跑 schema.sql；若 schema.sql 不是幂等的（无 `IF NOT EXISTS`），生产部署可能报错。建议改为 `mode: never`，并将 schema 迁移交给 Flyway / Liquibase。
 
-### 16. `ChatService.streamChat` 中 `emitter.onError(t -> {})` 空回调
-
-吞错不利于排查，至少打日志。
-
----
-
 ## 💡 [suggestion] 改进建议
 
 ### 17. `LongTermMemoryService.consolidateMemories` 改为批量算法

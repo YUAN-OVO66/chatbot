@@ -118,9 +118,13 @@ public class ChatService {
     private static final long[] RETRY_DELAYS_MS = {1000, 2000, 3000};
 
     public void streamChat(ChatRequest request, SseEmitter emitter) {
-        emitter.onCompletion(() -> {});
-        emitter.onTimeout(() -> emitter.complete());
-        emitter.onError(t -> {});
+        emitter.onCompletion(() -> log.debug("[ChatService-Stream] SSE completed | userId={}", request.userId()));
+        emitter.onTimeout(() -> {
+            log.warn("[ChatService-Stream] SSE timeout | userId={}", request.userId());
+            emitter.complete();
+        });
+        emitter.onError(t -> log.warn("[ChatService-Stream] SSE error | userId={}, error={}",
+                request.userId(), t.toString()));
 
         chatTaskExecutor.submit(() -> {
             try {
