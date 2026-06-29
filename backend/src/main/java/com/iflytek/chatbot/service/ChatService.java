@@ -14,8 +14,8 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -31,29 +31,29 @@ public class ChatService {
 
     private final ChatClient chatClient;
     private final ChatMemory chatMemory;
-    private final ChatMemoryRepository chatMemoryRepository;
     private final SessionService sessionService;
     private final PluginService pluginService;
     private final ObjectMapper objectMapper;
     private final AsyncPostProcessor asyncPostProcessor;
     private final ThreadPoolTaskExecutor chatTaskExecutor;
+    private final JdbcTemplate jdbcTemplate;
 
     public ChatService(ChatClient chatClient,
                        ChatMemory chatMemory,
-                       ChatMemoryRepository chatMemoryRepository,
                        SessionService sessionService,
                        PluginService pluginService,
                        ObjectMapper objectMapper,
                        AsyncPostProcessor asyncPostProcessor,
-                       @Qualifier("chatTaskExecutor") ThreadPoolTaskExecutor chatTaskExecutor) {
+                       @Qualifier("chatTaskExecutor") ThreadPoolTaskExecutor chatTaskExecutor,
+                       JdbcTemplate jdbcTemplate) {
         this.chatClient = chatClient;
         this.chatMemory = chatMemory;
-        this.chatMemoryRepository = chatMemoryRepository;
         this.sessionService = sessionService;
         this.pluginService = pluginService;
         this.objectMapper = objectMapper;
         this.asyncPostProcessor = asyncPostProcessor;
         this.chatTaskExecutor = chatTaskExecutor;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     public ChatResponse chat(ChatRequest request) {
@@ -321,23 +321,14 @@ public class ChatService {
      */
     private void fixMemoryUserMessage(String sessionId, String originalMessage) {
         try {
-            List<Message> messages = chatMemoryRepository.findByConversationId(sessionId);
-            if (messages.isEmpty()) {
-                return;
-            }
+            // 只 UPDATE 最近一条 USER 消息的 content，避免 saveAll 整段历史 delete-then-insert 的写放大
+            int updated = jdbcTemplate.update(
+                    "UPDATE SPRING_AI_CHAT_MEMORY SET content = ? " +
+                            "WHERE conversation_id = ? AND type = 'USER' " +
+                            "ORDER BY timestamp DESC LIMIT 1",
+                    originalMessage, sessionId);
 
-            // 找到最后一条用户消息并替换内容
-            boolean replaced = false;
-            for (int i = messages.size() - 1; i >= 0; i--) {
-                if (messages.get(i) instanceof UserMessage) {
-                    messages.set(i, new UserMessage(originalMessage));
-                    replaced = true;
-                    break;
-                }
-            }
-
-            if (replaced) {
-                chatMemoryRepository.saveAll(sessionId, messages);
+            if (updated > 0) {
                 log.info("[ChatService] 已还原记忆中的用户消息为原始输入 | sessionId={}", sessionId);
             }
         } catch (Exception e) {

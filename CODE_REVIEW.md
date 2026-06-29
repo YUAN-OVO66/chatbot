@@ -49,24 +49,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟡 [important] 中等优先级问题（建议在近期迭代修复）
 
-### 5. `fixMemoryUserMessage` 对整段历史 `saveAll`
-
-**位置**：`ChatService.java:315-339`
-
-```java
-List<Message> messages = chatMemoryRepository.findByConversationId(sessionId);
-...
-messages.set(i, new UserMessage(originalMessage));
-chatMemoryRepository.saveAll(sessionId, messages);
-```
-
-只为改"最后一条用户消息"，却读取并重写整段历史；当对话长度增长时是 O(n) 写入 + 网络往返。`JdbcChatMemoryRepository` 的 `saveAll` 实现通常是 delete-then-insert，写放大严重。
-
-**建议**：
-- 在调用 `chatClient.prompt().user(actualQuery)` 前，先在 ChatMemory 写入原始消息（自己 add），让 MessageChatMemoryAdvisor 不去重复加 actualQuery；或在 Advisor 层做切面，识别 PluginContext 直接替换。
-
----
-
 ### 6. `LongTermMemoryService.persistFacts` 内 LLM 返回结构非健壮
 
 **位置**：`LongTermMemoryService.java:250-265`
