@@ -51,10 +51,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟢 [nit] 低优先级 / 风格
 
-### 11. `isConnectionReset` 基于字符串匹配 + 中文断言
-
-`ChatService.java:246-272` 用 message 文本里的中文 / 英文短语判断网络错误，依赖 OS 语言环境（"远程主机强迫关闭"是简中 Windows 才出现）。建议改判异常类型 `java.net.SocketException`、`java.io.EOFException`、Netty 的 `PrematureCloseException` 等。
-
 ### 12. `CalculatorPlugin.evaluate` 抛 `RuntimeException`
 
 `new RuntimeException("Unexpected character: ...")` 落入 `catch (Exception)` OK，但建议改自定义 `ParseException`，避免被外层异常处理误吞。

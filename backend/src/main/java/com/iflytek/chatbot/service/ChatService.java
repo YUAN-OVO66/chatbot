@@ -253,24 +253,18 @@ public class ChatService {
     private boolean isConnectionReset(Throwable e) {
         Throwable cause = e;
         while (cause != null) {
-            String msg = cause.getMessage();
-            if (msg != null) {
-                String lower = msg.toLowerCase();
-                if (lower.contains("connection reset")
-                        || lower.contains("connection reset by peer")
-                        || lower.contains("broken pipe")
-                        || lower.contains("connection closed")
-                        || lower.contains("unexpected end of stream")
-                        || lower.contains("socket closed")
-                        || lower.contains("forcibly closed")
-                        || lower.contains("远程主机强迫关闭了一个现有的连接")) {
-                    return true;
-                }
+            // 优先判断异常类型，跨 OS 语言环境稳定
+            if (cause instanceof java.net.SocketException
+                    || cause instanceof java.io.EOFException
+                    || cause instanceof java.net.SocketTimeoutException
+                    || cause instanceof java.nio.channels.ClosedChannelException) {
+                return true;
             }
-            // 检查异常类型
-            String className = cause.getClass().getSimpleName();
-            if (className.contains("Reset") || className.contains("Pipe")
-                    || className.contains("ConnectException") || className.contains("SocketException")) {
+            // Netty / reactor-netty 在不同版本下的连接异常类（避免硬依赖，按类名匹配）
+            String fqcn = cause.getClass().getName();
+            if (fqcn.equals("io.netty.channel.StacklessClosedChannelException")
+                    || fqcn.equals("io.netty.handler.timeout.ReadTimeoutException")
+                    || fqcn.equals("reactor.netty.http.client.PrematureCloseException")) {
                 return true;
             }
             cause = cause.getCause();
