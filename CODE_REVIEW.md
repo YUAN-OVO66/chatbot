@@ -51,18 +51,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟢 [nit] 低优先级 / 风格
 
-### 14. `MemoryController.deleteFact` 静默吞掉异常
-
-```java
-try {
-    semanticMemoryService.deleteFactDocument(factId);
-} catch (Exception e) {
-    // 向量删除失败不影响 MySQL 软删除
-}
-```
-
-建议至少 `log.warn(... e)`，否则向量与 MySQL 长期不一致难排查。
-
 ### 15. JPA `ddl-auto: validate` + `schema-locations: classpath:schema.sql`
 
 两者并存是合理的（外部 SQL 建表 + JPA 校验），但 `mode: always` 会在每次启动重跑 schema.sql；若 schema.sql 不是幂等的（无 `IF NOT EXISTS`），生产部署可能报错。建议改为 `mode: never`，并将 schema 迁移交给 Flyway / Liquibase。

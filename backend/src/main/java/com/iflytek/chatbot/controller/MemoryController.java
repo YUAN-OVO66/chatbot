@@ -7,6 +7,8 @@ import com.iflytek.chatbot.repository.UserMemoryFactRepository;
 import com.iflytek.chatbot.repository.UserPreferenceRepository;
 import com.iflytek.chatbot.service.LongTermMemoryService;
 import com.iflytek.chatbot.service.SemanticMemoryService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemory;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -21,6 +23,8 @@ import java.util.List;
 @RequestMapping("/api/memory")
 @Tag(name = "记忆管理", description = "查看、创建、编辑、删除长期记忆事实与用户偏好")
 public class MemoryController {
+
+    private static final Logger log = LoggerFactory.getLogger(MemoryController.class);
 
     private final UserMemoryFactRepository factRepository;
     private final UserPreferenceRepository preferenceRepository;
@@ -104,7 +108,9 @@ public class MemoryController {
             try {
                 semanticMemoryService.deleteFactDocument(factId);
             } catch (Exception e) {
-                // 向量删除失败不影响 MySQL 软删除
+                // 向量删除失败不影响 MySQL 软删除，但要日志方便排查向量/MySQL 长期不一致
+                log.warn("[MemoryController] 删除 Milvus 向量失败 | factId={}, error={}",
+                        factId, e.getMessage(), e);
             }
         });
         return Result.success();
