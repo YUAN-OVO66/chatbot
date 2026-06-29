@@ -51,10 +51,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟢 [nit] 低优先级 / 风格
 
-### 9. 注释与实际值不一致
-
-`RagService.java:27` 注释 `// 20MB` 而实际 `30 * 1024 * 1024`，`validateFile` 抛错也写"超过20MB限制"。`application.yml` 的 `max-file-size: 30MB`。统一为 30MB。
-
 ### 10. Advisor 代码重复
 
 `LongTermMemoryAdvisor.before` 与 `RagAdvisor.before` 几乎是同一份模板：取 userMessage → 检索 → 构造 SystemMessage → mutate。建议抽出 `AbstractContextInjectingAdvisor`，子类只实现 `retrieve(userId, query)` 与 `formatHeader()`。

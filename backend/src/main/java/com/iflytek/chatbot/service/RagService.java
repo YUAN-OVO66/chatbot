@@ -26,7 +26,7 @@ import java.util.Set;
 public class RagService {
 
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
-    private static final long MAX_FILE_SIZE = 30 * 1024 * 1024; // 20MB
+    private static final long MAX_FILE_SIZE = 30 * 1024 * 1024;
     private static final Set<String> ALLOWED_TYPES = Set.of("pdf", "txt", "md");
 
     private final RagDocumentRepository ragDocumentRepository;
@@ -180,7 +180,7 @@ public class RagService {
             throw new BusinessException("文件不能为空");
         }
         if (file.getSize() > MAX_FILE_SIZE) {
-            throw new BusinessException("文件大小超过20MB限制");
+            throw new BusinessException("文件大小超过30MB限制");
         }
         String fileName = file.getOriginalFilename();
         if (fileName == null || fileName.isBlank()) {
