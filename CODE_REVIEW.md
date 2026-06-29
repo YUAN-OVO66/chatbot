@@ -49,24 +49,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟡 [important] 中等优先级问题（建议在近期迭代修复）
 
-### 7. `PluginService.isPluginEnabled` 在热路径 log.info
-
-**位置**：`PluginService.java:117-124`
-
-```java
-public boolean isPluginEnabled(String pluginName) {
-    ...
-    log.info("[PluginService] isPluginEnabled | plugin={}, override={}, config={}, result={}", ...);
-    return result;
-}
-```
-
-每条用户消息 × 每个插件 × beforeRag/afterRag 都会触发；3 个插件就是每条消息 6 行 INFO 日志，搜索压力大时日志爆炸。
-
-**建议**：降为 `log.trace` 或 `log.debug`。
-
----
-
 ### 8. `WebSearchPlugin` 静态 ObjectMapper 与共享 HttpClient
 
 **位置**：`WebSearchPlugin.java:37, 47-49`
