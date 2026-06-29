@@ -270,9 +270,16 @@ public class LongTermMemoryService {
     private int persistFacts(String conversationId, String userId, List<Map<String, Object>> facts) {
         int count = 0;
         for (Map<String, Object> factData : facts) {
-            String text = (String) factData.get("text");
-            String category = (String) factData.getOrDefault("category", "general");
-            byte importance = ((Number) factData.getOrDefault("importance", 5)).byteValue();
+            String text = factData.get("text") instanceof String s ? s.trim() : null;
+            if (text == null || text.isEmpty()) {
+                log.debug("[Extract] skip fact: empty text");
+                continue;
+            }
+
+            String category = factData.get("category") instanceof String c ? c : "general";
+
+            // importance 可能是数字 / 字符串 / 缺失，统一 clamp 到 [1, 10]
+            byte importance = parseImportance(factData.get("importance"));
 
             try {
                 persistFact(conversationId, userId, text, category, importance);
@@ -283,6 +290,20 @@ public class LongTermMemoryService {
             count++;
         }
         return count;
+    }
+
+    private static byte parseImportance(Object raw) {
+        int v = 5;
+        if (raw instanceof Number n) {
+            v = n.intValue();
+        } else if (raw instanceof String s) {
+            try {
+                v = Integer.parseInt(s.trim());
+            } catch (NumberFormatException ignored) {
+                // 非数字字符串（如 "high"）走默认 5
+            }
+        }
+        return (byte) Math.max(1, Math.min(10, v));
     }
 
     private void persistFact(String conversationId, String userId,

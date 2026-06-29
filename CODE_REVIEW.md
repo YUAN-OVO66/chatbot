@@ -49,27 +49,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟡 [important] 中等优先级问题（建议在近期迭代修复）
 
-### 6. `LongTermMemoryService.persistFacts` 内 LLM 返回结构非健壮
-
-**位置**：`LongTermMemoryService.java:250-265`
-
-```java
-String text = (String) factData.get("text");
-String category = (String) factData.getOrDefault("category", "general");
-byte importance = ((Number) factData.getOrDefault("importance", 5)).byteValue();
-```
-
-风险：
-- `text == null` 时 `factRepository.findByUserIdAndFactTextAndIsActive(userId, null, true)` 可能抛错或匹配异常。
-- `importance` 若是字符串 `"high"` 会 ClassCastException。
-- `importance` 超出 `byte` 范围（-128~127）时 `byteValue()` 静默截断，例如 256 → 0，可能误判为低重要性。
-
-**建议**：
-- 先校验 text 非空再走持久化。
-- importance 加 clamp：`int v = ((Number)x).intValue(); fact.setImportance((byte)Math.max(1, Math.min(10, v)));`
-
----
-
 ### 7. `PluginService.isPluginEnabled` 在热路径 log.info
 
 **位置**：`PluginService.java:117-124`
