@@ -11,24 +11,20 @@
 
 整体架构清晰：`ChatService` 串联 *Plugin → Advisor 链 → LLM → afterRag → 异步后处理*，四层记忆（短期窗口 / 语义检索 / 长期事实 / RAG 知识库）通过 Advisor `order` 解耦，可扩展性良好。最新的安全加固（`SemanticMemoryService` 中的 `requireSafeId`、`AsyncPostProcessor` 的 LRU 节流、`AsyncConfig` 的优雅停机）方向正确。
 
-但仍存在多个高危安全问题（特别是 shell 工具暴露 + 环境变量注入）、若干性能瓶颈（N+1 查询、O(N) 向量检索）、以及一些可维护性/正确性问题，需重点关注。
+剩余主要是若干性能 / 可维护性建议，🔴 已清零。
 
 | 类别 | 🔴 | 🟡 | 🟢 |
 |---|---|---|---|
-| 安全 | 1 | 3 | 1 |
+| 安全 | 0 | 2 | 0 |
 | 正确性 | 0 | 4 | 2 |
 | 性能 | 0 | 4 | 2 |
-| 可维护性 | 0 | 2 | 5 |
+| 可维护性 | 0 | 2 | 4 |
 
 ---
 
 ## 🟡 [important] 中等优先级问题（建议在近期迭代修复）
 
 ## 🟢 [nit] 低优先级 / 风格
-
-### 15. JPA `ddl-auto: validate` + `schema-locations: classpath:schema.sql`
-
-两者并存是合理的（外部 SQL 建表 + JPA 校验），但 `mode: always` 会在每次启动重跑 schema.sql；若 schema.sql 不是幂等的（无 `IF NOT EXISTS`），生产部署可能报错。建议改为 `mode: never`，并将 schema 迁移交给 Flyway / Liquibase。
 
 ## 💡 [suggestion] 改进建议
 
@@ -56,25 +52,23 @@
 
 ## 📚 [learning] 知识点
 
-- `MessageWindowChatMemory` 的窗口大小 30 一旦达到上限，`chatMemory.get()` 始终返回 30 条 → 节流分支 `currentSize - lastSize` 失效（见 §9）。
 - `MilvusVectorStore` 的 `filterExpression` 是 Milvus 表达式 DSL，目前 Spring AI 还未提供 builder 形式的安全 API，业内通行做法是输入侧白名单（项目已部分采用）。
 - Reactor 流式 + Servlet `SseEmitter` 桥接是常见痛点，业内一般直接用 WebFlux 的 `Flux<ServerSentEvent>` 或前端 fetch + reader 实现，可考虑后续迁移。
+- LLM 命令审查员（独立 ChatModel + fail-closed）只能作为静态白名单的叠加层，绝不能作为唯一防线：模型本身可能被同样的 prompt 注入手法绕过。
 
 ---
 
 ## 推荐合入门槛
 
-合入前必须修复的：**§1**（1 个 🔴 — Shell RCE）。
-近期迭代建议处理：§2, §3, §4, §5, §6, §8。
-其余在重构 / 整理时顺手清理即可。
+🔴 已清零，可合入。剩余 §17–§19 为长期建议，按节奏在后续迭代落实即可。
 
 ---
 
 ## 🎉 [praise] 做得好的部分
 
-- `AsyncPostProcessor` 节流逻辑 + LRU 容量上限的设计，避免无限 Map 增长（思路正确，剩余问题见 §9）。
 - `SemanticMemoryService` 的 `requireSafeId` 白名单校验是处理 Milvus filterExpression 的正确方式。
 - 四层记忆通过 `BaseChatMemoryAdvisor.order` 解耦，可插拔，新增"语义记忆 / 长期记忆 / RAG"无需修改 ChatClient 构造逻辑。
 - 插件链路 (`beforeRag` / `afterRag` + `SHORT_CIRCUIT` / `MODIFIED_QUERY` / `CONTINUE`) 的状态机定义清晰。
 - `RagVectorStoreConfig` 双 collection 隔离用户记忆与知识库，避免污染。
 - `AsyncConfig.setWaitForTasksToCompleteOnShutdown(true)` + `setAwaitTerminationSeconds(30)` 做了正确的优雅停机。
+- Shell 工具的双层防御：静态 deny list（确定性）+ 独立 ChatModel 审查员（语义兜底，fail-closed），后者用 `@Lazy` 注入打破循环依赖。
