@@ -49,21 +49,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟡 [important] 中等优先级问题（建议在近期迭代修复）
 
-### 8. `WebSearchPlugin` 静态 ObjectMapper 与共享 HttpClient
-
-**位置**：`WebSearchPlugin.java:37, 47-49`
-
-`ObjectMapper` 静态字段、`HttpClient` 实例字段 —— OK，但：
-- 没有连接池上限或拒绝策略；外部慢响应可能拖死 `chatTaskExecutor`。
-- API key 来自 `pluginConfig.getOrDefault("api-key", "")`：空字符串 `isBlank()` 才跳过，但中间状态（如配置文件占位）会带空字符串发出请求并 401。
-- `parseSearchResults` 兜底返回原始 JSON 前 500 字符，可能把搜索厂商返回的错误信息（带敏感字段）传给 LLM 再回显给用户。
-
-**建议**：
-- 给 HttpClient 加 `executor` 和上限；调用层加超时熔断。
-- 兜底分支只返回固定文案 "搜索结果解析失败"，不要原样回灌。
-
----
-
 ## 🟢 [nit] 低优先级 / 风格
 
 ### 9. 注释与实际值不一致

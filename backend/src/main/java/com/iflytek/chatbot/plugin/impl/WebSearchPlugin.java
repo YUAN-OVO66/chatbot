@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
 
 /**
  * Web 搜索插件（百度 AI 搜索）
@@ -44,8 +45,14 @@ public class WebSearchPlugin implements ChatPlugin {
     );
 
     private final PluginConfigProperties config;
+    /** 专属线程池，避免外部慢响应拖死 chatTaskExecutor */
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
+            .executor(Executors.newFixedThreadPool(4, r -> {
+                Thread t = new Thread(r, "web-search-http");
+                t.setDaemon(true);
+                return t;
+            }))
             .build();
 
     public WebSearchPlugin(PluginConfigProperties config) {
@@ -128,11 +135,12 @@ public class WebSearchPlugin implements ChatPlugin {
 
     private String doSearch(String query) {
         Map<String, String> pluginConfig = config.getPluginConfig("web-search");
-        String apiKey = pluginConfig.getOrDefault("api-key", "");
+        String apiKey = pluginConfig.getOrDefault("api-key", "").trim();
         int topK = Integer.parseInt(pluginConfig.getOrDefault("top-k", "5"));
 
-        if (apiKey.isBlank()) {
-            log.warn("[WebSearchPlugin] 未配置 API key，跳过搜索");
+        // 配置文件可能带 ${...} 占位符没被替换，过滤掉以免发出 401 请求
+        if (apiKey.isBlank() || apiKey.startsWith("${")) {
+            log.warn("[WebSearchPlugin] API key 未配置或仍为占位符，跳过搜索");
             return null;
         }
 
@@ -228,27 +236,18 @@ public class WebSearchPlugin implements ChatPlugin {
                 }
             }
 
-            // 解析 result 字段（备用）
-            if (sb.isEmpty()) {
-                JsonNode resultNode = root.get("result");
-                if (resultNode != null) {
-                    sb.append(resultNode.toString().length() > 1000
-                            ? resultNode.toString().substring(0, 1000) + "..."
-                            : resultNode.toString());
-                }
-            }
-
             String parsed = sb.toString().trim();
             if (!parsed.isEmpty()) {
                 return parsed;
             }
 
-            // 最后兜底：返回原始 JSON 的前 500 字符
-            return body.length() > 500 ? body.substring(0, 500) + "..." : body;
+            // 兜底：不要把原始 JSON / 错误响应回灌给 LLM（可能含 token、内部字段等敏感信息）
+            log.warn("[WebSearchPlugin] 搜索响应未匹配任何已知结构 | bodyLen={}", body.length());
+            return null;
 
         } catch (Exception e) {
-            log.warn("[WebSearchPlugin] 解析搜索结果失败，返回原始响应", e);
-            return body.length() > 500 ? body.substring(0, 500) + "..." : body;
+            log.warn("[WebSearchPlugin] 解析搜索结果失败", e);
+            return null;
         }
     }
 }
