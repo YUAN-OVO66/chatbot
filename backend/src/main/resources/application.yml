@@ -97,3 +97,7 @@ chatbot:
   skills:
     directory: classpath:skills
     auto-reload: true
+    # 仅这些 .env 变量会注入到 skill 子进程；高敏感密钥（DB / LLM API Key）默认不外泄
+    passthrough-env:
+      - QWEATHER_API_KEY
+      - QWEATHER_API_HOST

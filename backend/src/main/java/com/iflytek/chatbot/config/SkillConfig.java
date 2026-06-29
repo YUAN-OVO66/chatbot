@@ -72,23 +72,26 @@ public class SkillConfig {
     private static final boolean IS_WINDOWS = System.getProperty("os.name").toLowerCase().contains("win");
 
     @Bean
-    public ToolCallback shellToolCallback() {
+    public ToolCallback shellToolCallback(SkillConfigProperties properties) {
         String example = IS_WINDOWS
                 ? "python C:/tmp/skills/weather/scripts/get_weather.py 北京"
                 : "python3 /tmp/skills/weather/scripts/get_weather.py 北京";
 
+        java.util.Set<String> allowedEnv = new java.util.LinkedHashSet<>(properties.getPassthroughEnv());
+
         ToolCallback callback = FunctionToolCallback.builder(
                         "shell",
-                        (ShellRequest request) -> executeShell(request.command()))
+                        (ShellRequest request) -> executeShell(request.command(), allowedEnv))
                 .description("Execute a command. On this system use 'python' (not 'python3'). " +
                         "Example: " + example)
                 .inputType(ShellRequest.class)
                 .build();
-        log.info("[SkillConfig] ShellToolCallback 已创建 | os={}", IS_WINDOWS ? "Windows" : "Unix");
+        log.info("[SkillConfig] ShellToolCallback 已创建 | os={}, passthroughEnv={}",
+                IS_WINDOWS ? "Windows" : "Unix", allowedEnv);
         return callback;
     }
 
-    private String executeShell(String command) {
+    private String executeShell(String command, java.util.Set<String> allowedEnv) {
         log.info("[Shell] 原始命令: {}", command);
 
         // Windows 兼容处理
@@ -113,13 +116,18 @@ public class SkillConfig {
             pb.redirectErrorStream(true);
             pb.environment().put("PYTHONIOENCODING", "utf-8");
 
-            // 将 .env 中的变量注入子进程环境（供 Python 脚本通过 os.environ 读取）
-            for (PropertySource<?> ps : environment.getPropertySources()) {
-                if (ps.getName().equals("dotenv") && ps.getSource() instanceof java.util.Properties props) {
-                    for (String key : props.stringPropertyNames()) {
-                        pb.environment().put(key, props.getProperty(key));
+            // 仅把白名单内的 .env 变量注入子进程，避免 DB/LLM 密钥默认外泄给 LLM 控制的脚本
+            if (!allowedEnv.isEmpty()) {
+                for (PropertySource<?> ps : environment.getPropertySources()) {
+                    if (ps.getName().equals("dotenv") && ps.getSource() instanceof java.util.Properties props) {
+                        for (String key : allowedEnv) {
+                            String value = props.getProperty(key);
+                            if (value != null) {
+                                pb.environment().put(key, value);
+                            }
+                        }
+                        break;
                     }
-                    break;
                 }
             }
 
