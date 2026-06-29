@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface MemoryExtractionLogRepository extends JpaRepository<MemoryExtractionLog, Long> {
@@ -12,4 +13,7 @@ public interface MemoryExtractionLogRepository extends JpaRepository<MemoryExtra
     List<MemoryExtractionLog> findByConversationIdOrderByCreatedAtDesc(String conversationId);
 
     List<MemoryExtractionLog> findByUserIdOrderByCreatedAtDesc(String userId);
+
+    Optional<MemoryExtractionLog> findTopByConversationIdAndStatusOrderByCreatedAtDesc(
+            String conversationId, String status);
 }

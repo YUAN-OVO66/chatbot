@@ -49,21 +49,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟡 [important] 中等优先级问题（建议在近期迭代修复）
 
-### 4. `AsyncPostProcessor.lastExtractedSize` 节流键无清理 + 不持久化
-
-**位置**：`AsyncPostProcessor.java:25-31`
-
-`LinkedHashMap` LRU 容量 500 已经避免无限增长，但：
-- 重启后清零，重启刚结束的瞬间所有 session 都会被立即触发提取。
-- LRU 是按访问顺序（access-order），并发场景下 `Collections.synchronizedMap` 在写 + 读时存在隐式锁竞争（对每个会话每次 chat 都会触发）。
-- `chatMemory.get(sessionId)` 返回的 size 是滑动窗口（30 条）后的结果，达到上限后 `currentSize` 不再增长，触发条件 `currentSize - lastSize >= 4` 永远成立 → 退化为每 1 条就触发一次。
-
-**建议**：
-- 把"上次提取的 messageId / 时间戳 / 累计消息数"持久化到 `MemoryExtractionLog` 或会话表。
-- 直接读 `MemoryExtractionLog` 最新一条作为 `lastExtractedSize`，淘汰内存 Map。
-
----
-
 ### 5. `fixMemoryUserMessage` 对整段历史 `saveAll`
 
 **位置**：`ChatService.java:315-339`
