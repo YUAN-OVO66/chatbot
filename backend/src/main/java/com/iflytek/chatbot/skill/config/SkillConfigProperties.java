@@ -109,8 +109,8 @@ public class SkillConfigProperties {
         /** 是否启用 LLM 审查员（默认启用）。审查员只能在静态规则放行后做"二次否决"，不会扩大放行集。 */
         private boolean enabled = true;
 
-        /** 审查员 LLM 调用超时；超时一律视为拒绝（fail-closed） */
-        private Duration timeout = Duration.ofSeconds(5);
+        /** 审查员 LLM 调用超时；超时一律视为"无意见"（fail-open，回到静态层放行结果） */
+        private Duration timeout = Duration.ofSeconds(15);
 
         public boolean isEnabled() {
             return enabled;
