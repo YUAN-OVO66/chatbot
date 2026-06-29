@@ -87,7 +87,7 @@ public class CalculatorPlugin implements ChatPlugin {
         double parse() {
             double result = parseExpression();
             if (pos < input.length()) {
-                throw new RuntimeException("Unexpected character: " + input.charAt(pos));
+                throw new ParseException("Unexpected character: " + input.charAt(pos));
             }
             return result;
         }
@@ -140,8 +140,15 @@ public class CalculatorPlugin implements ChatPlugin {
             while (pos < input.length() && (Character.isDigit(input.charAt(pos)) || input.charAt(pos) == '.')) {
                 pos++;
             }
-            if (start == pos) throw new RuntimeException("Expected number at position " + pos);
+            if (start == pos) throw new ParseException("Expected number at position " + pos);
             return Double.parseDouble(input.substring(start, pos));
+        }
+    }
+
+    /** 计算器内部表达式解析异常，避免被外层 catch(RuntimeException) 误吞。 */
+    private static class ParseException extends RuntimeException {
+        ParseException(String message) {
+            super(message);
         }
     }
 }

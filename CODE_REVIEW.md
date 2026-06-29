@@ -51,10 +51,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟢 [nit] 低优先级 / 风格
 
-### 12. `CalculatorPlugin.evaluate` 抛 `RuntimeException`
-
-`new RuntimeException("Unexpected character: ...")` 落入 `catch (Exception)` OK，但建议改自定义 `ParseException`，避免被外层异常处理误吞。
-
 ### 13. `SkillConfig.executeShell` 的 Windows 命令改写依赖 regex 替换
 
 `replaceFirst("^(bash(\\s+-c)?\\s+|cmd(\\s+/c)?\\s+)", "")` 等改写逻辑碎片化，难以测试。建议在抽象层处理 OS 差异，规则集中、并写单测覆盖。
