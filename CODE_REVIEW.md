@@ -51,10 +51,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟢 [nit] 低优先级 / 风格
 
-### 10. Advisor 代码重复
-
-`LongTermMemoryAdvisor.before` 与 `RagAdvisor.before` 几乎是同一份模板：取 userMessage → 检索 → 构造 SystemMessage → mutate。建议抽出 `AbstractContextInjectingAdvisor`，子类只实现 `retrieve(userId, query)` 与 `formatHeader()`。
-
 ### 11. `isConnectionReset` 基于字符串匹配 + 中文断言
 
 `ChatService.java:246-272` 用 message 文本里的中文 / 英文短语判断网络错误，依赖 OS 语言环境（"远程主机强迫关闭"是简中 Windows 才出现）。建议改判异常类型 `java.net.SocketException`、`java.io.EOFException`、Netty 的 `PrematureCloseException` 等。
