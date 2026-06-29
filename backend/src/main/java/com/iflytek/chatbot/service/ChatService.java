@@ -151,6 +151,7 @@ public class ChatService {
                 // 3. 带重试的流式调用
                 log.info("[ChatService-Stream] >>> 开始流式调用 | message={}", actualQuery);
                 long start = System.currentTimeMillis();
+                final boolean[] chunkEmitted = {false}; // 一旦发出过 delta 就不再重试，避免客户端拼接重复内容
 
                 for (int attempt = 0; attempt <= MAX_STREAM_RETRIES; attempt++) {
                     try {
@@ -176,6 +177,7 @@ public class ChatService {
                                         emitter.send(SseEmitter.event()
                                                 .name("delta")
                                                 .data(toJson(Map.of("content", chunk))));
+                                        chunkEmitted[0] = true;
                                     } catch (Exception e) {
                                         log.warn("[ChatService-Stream] 发送 chunk 失败: {}", e.getMessage());
                                     }
@@ -214,6 +216,11 @@ public class ChatService {
 
                     } catch (Exception e) {
                         boolean isConnectionError = isConnectionReset(e);
+                        if (chunkEmitted[0]) {
+                            log.warn("[ChatService-Stream] 已发出 delta, 放弃重试以避免重复内容 | attempt={}, error={}",
+                                    attempt + 1, e.getMessage());
+                            throw e;
+                        }
                         if (isConnectionError && attempt < MAX_STREAM_RETRIES) {
                             log.warn("[ChatService-Stream] 连接异常, 将重试 | attempt={}, error={}", attempt + 1, e.getMessage());
                             continue;

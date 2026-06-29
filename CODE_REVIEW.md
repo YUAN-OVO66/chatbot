@@ -15,10 +15,10 @@
 
 | 类别 | 🔴 | 🟡 | 🟢 |
 |---|---|---|---|
-| 安全 | 5 | 3 | 1 |
-| 正确性 | 2 | 4 | 2 |
-| 性能 | 1 | 4 | 2 |
-| 可维护性 | 0 | 3 | 5 |
+| 安全 | 1 | 3 | 1 |
+| 正确性 | 0 | 4 | 2 |
+| 性能 | 0 | 4 | 2 |
+| 可维护性 | 0 | 2 | 5 |
 
 ---
 
@@ -47,98 +47,9 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ---
 
-### 2. .env 全量注入到子进程，导致密钥泄露给 LLM 控制的脚本 ✅ 已修复（2026-06-29）
-
-**位置**：`SkillConfig.java:117-124`（修复前）
-
-```java
-if (ps.getName().equals("dotenv") && ps.getSource() instanceof java.util.Properties props) {
-    for (String key : props.stringPropertyNames()) {
-        pb.environment().put(key, props.getProperty(key));
-    }
-}
-```
-
-`.env` 中包含 `DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY`、`QIANFAN_API_KEY`、`MYSQL_PASSWORD`、`MILVUS_HOST` 等。任何被 LLM 调起的 Python 脚本都能 `os.environ` 读到，配合上面的 RCE，相当于密钥默认外泄。
-
-**建议**：
-- 引入显式白名单 `chatbot.skills.passthrough-env=KEY1,KEY2`，只透传声明过的变量。
-- 默认空白名单；高敏感密钥（DB 密码、API Key）不进白名单。
-
-**修复实现**：
-- [SkillConfigProperties.java](backend/src/main/java/com/iflytek/chatbot/skill/config/SkillConfigProperties.java) 新增 `passthroughEnv: List<String>` 字段，默认空列表。
-- [SkillConfig.java:74-92](backend/src/main/java/com/iflytek/chatbot/config/SkillConfig.java#L74-L92) 把白名单 Set 闭包给 `executeShell`；[SkillConfig.java:119-131](backend/src/main/java/com/iflytek/chatbot/config/SkillConfig.java#L119-L131) 改为只遍历白名单 key，并跳过 `null`，不会把已有 ENV 删空。
-- [application.yml:97-104](backend/src/main/resources/application.yml#L97-L104) 显式声明 `passthrough-env: [QWEATHER_API_KEY, QWEATHER_API_HOST]`，仅天气查询需要的两个非敏感变量被透传。
-
-**效果**：默认空白名单 → LLM 调起的 Python 脚本通过 `os.environ` 读不到 DB/LLM 密钥；只有声明的 key 才会注入。
-
----
-
-### 3. GlobalExceptionHandler 直接回显异常信息
-
-**位置**：`GlobalExceptionHandler.java:18-22`
-
-```java
-@ExceptionHandler(RuntimeException.class)
-public Result<Void> handleRuntimeException(RuntimeException e) {
-    return Result.error(e.getMessage());
-}
-```
-
-`RuntimeException` 在本项目里被当成业务异常滥用（如 `SessionService.getSession` 抛 `"Session not found: " + id`、`RagService` 抛 `"无权删除该文档"`，但 JPA / Milvus / JSON 解析失败抛出的 `RuntimeException` 也会落入此分支），可能把 SQL 片段、表名、连接 URL、堆栈中带出的路径直接吐给前端。
-
-**建议**：
-- 引入业务异常 `BusinessException`，仅这类异常回显 message。
-- 其他 `RuntimeException` 一律返回脱敏文案（如 "服务器内部错误"），仅日志记录详情；同时返回 traceId 便于排查。
-
----
-
-### 4. Milvus filterExpression 字符串拼接，部分调用缺校验
-
-**位置**：
-- ✅ `SemanticMemoryService.java:34-44` 已加 `requireSafeId` / `requireSafeFactId`
-- ❌ `RagService.java:147` `delete("userId == '" + userId + "' && documentId == '" + documentId + "'")`
-- ❌ `RagService.java:158-167` `searchRelevantChunks` 同样直接拼接 `userId`
-
-虽然 `userId` 在 Controller 层是 `@RequestParam`，但缺少格式校验，存在表达式注入空间（如 `userId='x' || type=='rag'` 可能跨用户读到他人数据）。
-
-**建议**：
-- 把 `SemanticMemoryService.SAFE_ID` 提到公共校验工具类，所有进入 `filterExpression` 的字符串统一过校验。
-- 或全面改用 `Filter.Expression` API（参数化构造），避免任何手工拼接。
-
----
-
-### 5. ChatService.streamChat 在重试时会重复发送已发出的 chunk
-
-**位置**：`ChatService.java:155-223`
-
-```java
-for (int attempt = 0; attempt <= MAX_STREAM_RETRIES; attempt++) {
-    ...
-    chatClient.prompt()...stream()
-        .doOnNext(chunk -> {
-            fullReply.append(chunk);
-            emitter.send(... "delta" ...);   // 已经推到客户端
-        })
-        .blockLast();
-    if (streamError[0] != null) throw streamError[0];
-}
-```
-
-如果在流的中间断开（很常见），已经 `emitter.send(...)` 的内容无法撤销；下一次重试又从头流式输出，客户端会拼接出"前半段 + 完整段"的重复内容。
-
-此外 `Thread.sleep(delay)` 在 `chatTaskExecutor` 线程里堵塞，重试期间占住线程池资源。
-
-**建议**：
-- 只在"未发出任何 delta 之前"重试；一旦开始发了，遇到错误就 `completeWithError` 让前端处理。
-- 或前端用 message id + offset 去重；或服务端缓冲 + 一次性下发（不流式）。
-- `Thread.sleep` 换成 Reactor 的 `Mono.delay` 或在 `Scheduled` 中调度。
-
----
-
 ## 🟡 [important] 中等优先级问题（建议在近期迭代修复）
 
-### 6. N+1 查询：`retrieveRelevantFacts` 每条 doc 单独 `findById`
+### 2. N+1 查询：`retrieveRelevantFacts` 每条 doc 单独 `findById`
 
 **位置**：`LongTermMemoryService.java:68-74`
 
@@ -157,7 +68,7 @@ topK=5 时 5 次 SELECT；`consolidateMemories` 的内层循环（`removeSemanti
 
 ---
 
-### 7. `editDistance` 无长度上限 — 长事实文本会引发 CPU/内存尖刺
+### 3. `editDistance` 无长度上限 — 长事实文本会引发 CPU/内存尖刺
 
 **位置**：`LongTermMemoryService.java:469-484`
 
@@ -168,24 +79,7 @@ topK=5 时 5 次 SELECT；`consolidateMemories` 的内层循环（`removeSemanti
 
 ---
 
-### 8. 异常类型混用，无业务异常分层
-
-**位置**：`SessionService.java:39`、`RagService.java:118/140/143/175/178/183/186`、`LongTermMemoryService.java:170`
-
-```java
-throw new RuntimeException("Session not found: " + sessionId);
-throw new RuntimeException("无权删除该文档");
-```
-
-业务校验失败与系统级 `RuntimeException` 无法在 `GlobalExceptionHandler` 中区分；HTTP 状态码统一是 500，不利于前端处理。
-
-**建议**：
-- 引入 `BusinessException(code, message)` 和 `NotFoundException`、`ForbiddenException`。
-- 在 `GlobalExceptionHandler` 里映射到 4xx HTTP 状态码。
-
----
-
-### 9. `AsyncPostProcessor.lastExtractedSize` 节流键无清理 + 不持久化
+### 4. `AsyncPostProcessor.lastExtractedSize` 节流键无清理 + 不持久化
 
 **位置**：`AsyncPostProcessor.java:25-31`
 
@@ -200,7 +94,7 @@ throw new RuntimeException("无权删除该文档");
 
 ---
 
-### 10. `fixMemoryUserMessage` 对整段历史 `saveAll`
+### 5. `fixMemoryUserMessage` 对整段历史 `saveAll`
 
 **位置**：`ChatService.java:315-339`
 
@@ -218,7 +112,7 @@ chatMemoryRepository.saveAll(sessionId, messages);
 
 ---
 
-### 11. `LongTermMemoryService.persistFacts` 内 LLM 返回结构非健壮
+### 6. `LongTermMemoryService.persistFacts` 内 LLM 返回结构非健壮
 
 **位置**：`LongTermMemoryService.java:250-265`
 
@@ -239,7 +133,7 @@ byte importance = ((Number) factData.getOrDefault("importance", 5)).byteValue();
 
 ---
 
-### 12. `PluginService.isPluginEnabled` 在热路径 log.info
+### 7. `PluginService.isPluginEnabled` 在热路径 log.info
 
 **位置**：`PluginService.java:117-124`
 
@@ -257,7 +151,7 @@ public boolean isPluginEnabled(String pluginName) {
 
 ---
 
-### 13. `WebSearchPlugin` 静态 ObjectMapper 与共享 HttpClient
+### 8. `WebSearchPlugin` 静态 ObjectMapper 与共享 HttpClient
 
 **位置**：`WebSearchPlugin.java:37, 47-49`
 
@@ -274,27 +168,27 @@ public boolean isPluginEnabled(String pluginName) {
 
 ## 🟢 [nit] 低优先级 / 风格
 
-### 14. 注释与实际值不一致
+### 9. 注释与实际值不一致
 
 `RagService.java:27` 注释 `// 20MB` 而实际 `30 * 1024 * 1024`，`validateFile` 抛错也写"超过20MB限制"。`application.yml` 的 `max-file-size: 30MB`。统一为 30MB。
 
-### 15. Advisor 代码重复
+### 10. Advisor 代码重复
 
 `LongTermMemoryAdvisor.before` 与 `RagAdvisor.before` 几乎是同一份模板：取 userMessage → 检索 → 构造 SystemMessage → mutate。建议抽出 `AbstractContextInjectingAdvisor`，子类只实现 `retrieve(userId, query)` 与 `formatHeader()`。
 
-### 16. `isConnectionReset` 基于字符串匹配 + 中文断言
+### 11. `isConnectionReset` 基于字符串匹配 + 中文断言
 
 `ChatService.java:246-272` 用 message 文本里的中文 / 英文短语判断网络错误，依赖 OS 语言环境（"远程主机强迫关闭"是简中 Windows 才出现）。建议改判异常类型 `java.net.SocketException`、`java.io.EOFException`、Netty 的 `PrematureCloseException` 等。
 
-### 17. `CalculatorPlugin.evaluate` 抛 `RuntimeException`
+### 12. `CalculatorPlugin.evaluate` 抛 `RuntimeException`
 
 `new RuntimeException("Unexpected character: ...")` 落入 `catch (Exception)` OK，但建议改自定义 `ParseException`，避免被外层异常处理误吞。
 
-### 18. `SkillConfig.executeShell` 的 Windows 命令改写依赖 regex 替换
+### 13. `SkillConfig.executeShell` 的 Windows 命令改写依赖 regex 替换
 
 `replaceFirst("^(bash(\\s+-c)?\\s+|cmd(\\s+/c)?\\s+)", "")` 等改写逻辑碎片化，难以测试。建议在抽象层处理 OS 差异，规则集中、并写单测覆盖。
 
-### 19. `MemoryController.deleteFact` 静默吞掉异常
+### 14. `MemoryController.deleteFact` 静默吞掉异常
 
 ```java
 try {
@@ -306,11 +200,11 @@ try {
 
 建议至少 `log.warn(... e)`，否则向量与 MySQL 长期不一致难排查。
 
-### 20. JPA `ddl-auto: validate` + `schema-locations: classpath:schema.sql`
+### 15. JPA `ddl-auto: validate` + `schema-locations: classpath:schema.sql`
 
 两者并存是合理的（外部 SQL 建表 + JPA 校验），但 `mode: always` 会在每次启动重跑 schema.sql；若 schema.sql 不是幂等的（无 `IF NOT EXISTS`），生产部署可能报错。建议改为 `mode: never`，并将 schema 迁移交给 Flyway / Liquibase。
 
-### 21. `ChatService.streamChat` 中 `emitter.onError(t -> {})` 空回调
+### 16. `ChatService.streamChat` 中 `emitter.onError(t -> {})` 空回调
 
 吞错不利于排查，至少打日志。
 
@@ -318,22 +212,7 @@ try {
 
 ## 💡 [suggestion] 改进建议
 
-### 22. 引入业务异常体系 + traceId
-
-```java
-public class BusinessException extends RuntimeException {
-    private final int code;
-    public BusinessException(int code, String msg) { super(msg); this.code = code; }
-}
-```
-
-`GlobalExceptionHandler` 区分处理：
-```java
-@ExceptionHandler(BusinessException.class)  // -> 4xx，message 可回显
-@ExceptionHandler(Exception.class)          // -> 500，固定文案 + traceId
-```
-
-### 23. `LongTermMemoryService.consolidateMemories` 改为批量算法
+### 17. `LongTermMemoryService.consolidateMemories` 改为批量算法
 
 伪代码：
 1. 一次性取活跃 facts 与对应 embedding（或缓存）。
@@ -343,17 +222,13 @@ public class BusinessException extends RuntimeException {
 
 预期：N=100 时由当前 ~500 次向量查询降到 0 次（如复用已有向量）+ 1 次 SQL batch。
 
-### 24. 抽出"用户标识"验证工具
-
-将 `SemanticMemoryService.SAFE_ID` / `SAFE_FACT_ID` 模式提到 `IdValidators` 工具类，由 Controller 入口校验，Service 层始终信任 —— 单点收敛，避免遗漏。
-
-### 25. 给 `chatTaskExecutor` 加拒绝策略与监控指标
+### 18. 给 `chatTaskExecutor` 加拒绝策略与监控指标
 
 `AsyncConfig` 没显式设置 `RejectedExecutionHandler`，默认 `AbortPolicy`：队列满会抛 `TaskRejectedException`，前端看到的是 5xx。建议：
 - 设置 `CallerRunsPolicy` 让突发量在用户线程降级处理。
 - 注入 Micrometer 指标：`active`, `queueSize`, `rejected`。
 
-### 26. `extractFacts` 的 prompt 改为强制 JSON 格式
+### 19. `extractFacts` 的 prompt 改为强制 JSON 格式
 
 当前 prompt 依赖模型自觉返回 JSON，并用 `startsWith("```")` 兜底剥代码块；DeepSeek 支持 `response_format: json_object`，建议直接走 structured output，可靠度更高。
 
@@ -369,8 +244,8 @@ public class BusinessException extends RuntimeException {
 
 ## 推荐合入门槛
 
-合入前必须修复的：**§1, §2, §3, §4, §5**（5 个 🔴）。
-近期迭代建议处理：§6, §7, §8, §9, §10, §11, §13。
+合入前必须修复的：**§1**（1 个 🔴 — Shell RCE）。
+近期迭代建议处理：§2, §3, §4, §5, §6, §8。
 其余在重构 / 整理时顺手清理即可。
 
 ---

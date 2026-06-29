@@ -2,6 +2,7 @@ package com.iflytek.chatbot.service;
 
 import com.iflytek.chatbot.dto.SessionResponse;
 import com.iflytek.chatbot.entity.ChatSession;
+import com.iflytek.chatbot.exception.BusinessException;
 import com.iflytek.chatbot.repository.ChatSessionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,7 +39,7 @@ public class SessionService {
         return sessionRepository.findById(sessionId)
                 .orElseThrow(() -> {
                     log.warn("[Session] 会话不存在 | sessionId={}", sessionId);
-                    return new RuntimeException("Session not found: " + sessionId);
+                    return new BusinessException(404, "Session not found: " + sessionId);
                 });
     }
 

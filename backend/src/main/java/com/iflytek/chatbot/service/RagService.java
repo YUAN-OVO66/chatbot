@@ -2,7 +2,9 @@ package com.iflytek.chatbot.service;
 
 import com.iflytek.chatbot.dto.RagDocumentResponse;
 import com.iflytek.chatbot.entity.RagDocument;
+import com.iflytek.chatbot.exception.BusinessException;
 import com.iflytek.chatbot.repository.RagDocumentRepository;
+import com.iflytek.chatbot.util.IdValidators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -47,6 +49,7 @@ public class RagService {
      * 上传文档：验证 → 读取 → 分块 → 向量化 → 持久化
      */
     public RagDocumentResponse uploadDocument(String userId, MultipartFile file) {
+        IdValidators.requireSafeId(userId, "userId");
         log.info("[RagService] 开始上传文档 | userId={}, fileName={}, fileSize={}",
                 userId, file.getOriginalFilename(), file.getSize());
 
@@ -115,7 +118,7 @@ public class RagService {
             ragDocument.setStatus("failed");
             ragDocument.setErrorMessage(e.getMessage());
             ragDocumentRepository.save(ragDocument);
-            throw new RuntimeException("文档处理失败: " + e.getMessage(), e);
+            throw new BusinessException("文档处理失败: " + e.getMessage(), e);
         }
     }
 
@@ -134,13 +137,14 @@ public class RagService {
      * 删除文档：删除 Milvus 向量 + MySQL 记录
      */
     public void deleteDocument(String userId, Long documentId) {
+        IdValidators.requireSafeId(userId, "userId");
         log.info("[RagService] 删除文档 | userId={}, documentId={}", userId, documentId);
 
         RagDocument doc = ragDocumentRepository.findById(documentId)
-                .orElseThrow(() -> new RuntimeException("文档不存在: " + documentId));
+                .orElseThrow(() -> new BusinessException(404, "文档不存在: " + documentId));
 
         if (!doc.getUserId().equals(userId)) {
-            throw new RuntimeException("无权删除该文档");
+            throw new BusinessException(403, "无权删除该文档");
         }
 
         // 删除 Milvus 向量
@@ -156,6 +160,7 @@ public class RagService {
      * 语义检索相关文本块（供 RagAdvisor 调用）
      */
     public List<Document> searchRelevantChunks(String userId, String query, int topK) {
+        IdValidators.requireSafeId(userId, "userId");
         log.info("[RagService] 检索相关文本块 | userId={}, topK={}, query={}",
                 userId, topK, query.length() > 40 ? query.substring(0, 40) + "..." : query);
 
@@ -172,18 +177,18 @@ public class RagService {
 
     private void validateFile(MultipartFile file) {
         if (file.isEmpty()) {
-            throw new RuntimeException("文件不能为空");
+            throw new BusinessException("文件不能为空");
         }
         if (file.getSize() > MAX_FILE_SIZE) {
-            throw new RuntimeException("文件大小超过20MB限制");
+            throw new BusinessException("文件大小超过20MB限制");
         }
         String fileName = file.getOriginalFilename();
         if (fileName == null || fileName.isBlank()) {
-            throw new RuntimeException("文件名不能为空");
+            throw new BusinessException("文件名不能为空");
         }
         String fileType = extractFileType(fileName);
         if (!ALLOWED_TYPES.contains(fileType)) {
-            throw new RuntimeException("不支持的文件类型: " + fileType + "，仅支持 PDF/TXT/MD");
+            throw new BusinessException("不支持的文件类型: " + fileType + "，仅支持 PDF/TXT/MD");
         }
     }
 
