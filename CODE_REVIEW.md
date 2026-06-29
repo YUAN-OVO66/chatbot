@@ -49,17 +49,6 @@ ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
 
 ## 🟡 [important] 中等优先级问题（建议在近期迭代修复）
 
-### 3. `editDistance` 无长度上限 — 长事实文本会引发 CPU/内存尖刺
-
-**位置**：`LongTermMemoryService.java:469-484`
-
-`fact_text` 列是 `TEXT`，长度上限取决于 MySQL（最高 65535 字节）。两条 10KB 的事实做编辑距离 = 10K × 10K = 1 亿格 int 数组，会瞬间打满内存。
-
-**建议**：
-- `calculateTextSimilarity` 前判长：超过阈值（如 1024 字符）退化为只做 bigram Jaccard；或截断前 1024 字符再计算。
-
----
-
 ### 4. `AsyncPostProcessor.lastExtractedSize` 节流键无清理 + 不持久化
 
 **位置**：`AsyncPostProcessor.java:25-31`

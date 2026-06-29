@@ -449,6 +449,9 @@ public class LongTermMemoryService {
         return calculateTextSimilarity(text, doc.getText());
     }
 
+    /** 长文本退化阈值：超过则跳过 O(m*n) 的编辑距离，避免 CPU/内存尖刺 */
+    private static final int EDIT_DISTANCE_MAX_LEN = 1024;
+
     private double calculateTextSimilarity(String text1, String text2) {
         if (text1.equals(text2)) return 1.0;
 
@@ -469,6 +472,11 @@ public class LongTermMemoryService {
         Set<Character> charUnion = new HashSet<>(chars1);
         charUnion.addAll(chars2);
         double charJaccard = charUnion.isEmpty() ? 0.0 : (double) charInter.size() / charUnion.size();
+
+        // 超长文本退化为只用 Jaccard，权重重新归一（0.5 + 0.25 = 0.75 → 各按比例放大）
+        if (text1.length() > EDIT_DISTANCE_MAX_LEN || text2.length() > EDIT_DISTANCE_MAX_LEN) {
+            return bigramJaccard * (0.5 / 0.75) + charJaccard * (0.25 / 0.75);
+        }
 
         int maxLen = Math.max(text1.length(), text2.length());
         double editSimilarity = maxLen == 0 ? 1.0 : 1.0 - ((double) editDistance(text1, text2) / maxLen);
