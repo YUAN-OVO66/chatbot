@@ -22,31 +22,6 @@
 
 ---
 
-## 🔴 [blocking] 高优先级问题（建议合入前修复）
-
-### 1. Shell 工具任意命令执行（RCE 风险面过大）
-
-**位置**：`SkillConfig.java:75-148`
-
-`shellToolCallback` 把任意命令字符串交给 `ProcessBuilder` 执行，并作为 ToolCallback 暴露给 LLM。模型可被 prompt 注入诱导执行任意命令；任何能调 `/api/chat` 的用户即可间接控制后端进程。
-
-```java
-ProcessBuilder pb = new ProcessBuilder(command.split("\\s+"));
-```
-
-此外：
-- `command.split("\\s+")` 不能正确处理引号 / 含空格的路径参数，会被静默拆碎。
-- 30 秒超时不限制 CPU / 内存 / 磁盘 / 网络。
-- Windows 上的 `command.matches("^/.*\\.py\\s.*")` 拼接路径会被自动加 `python` 前缀，绕过更不显眼。
-
-**建议**：
-- 限定白名单：只允许运行 `skills/<name>/scripts/` 下、已注册技能内的脚本；禁止解释器外的任意命令。
-- 命令使用结构化参数（`List<String>`），而非字符串 split。
-- 在沙箱（容器、低权限用户、文件系统只读挂载）中运行。
-- 强烈建议默认禁用，仅在受信环境显式开启。
-
----
-
 ## 🟡 [important] 中等优先级问题（建议在近期迭代修复）
 
 ## 🟢 [nit] 低优先级 / 风格
